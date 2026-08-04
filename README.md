@@ -1,15 +1,17 @@
 # nyx
 
-Unsupervised sleep scoring from EEG and EMG.
+A flexible framework for sleep scoring across species, lifespan and modalities.
 
 nyx separates wake from sleep using EMG power, then splits sleep into stages by
 clustering a PCA of the EEG spectrogram. It needs **no training data and no
 manually scored examples** — which is what lets it work on species that have no
 scoring standard, and on recordings nobody has scored yet.
 
-Rodent scoring (Wake/NREM/REM) and human scoring (5 stages) are the same code:
-they differ in how many clustering steps run, which is configuration, not
-different pipelines.
+Rodent scoring (Wake/NREM/REM) and human scoring (five stages) are the same
+code. They differ in how many clustering steps run, which is configuration, not
+a different pipeline.
+
+If you use nyx, please cite the [preprint](https://www.biorxiv.org/content/10.64898/2026.07.24.740558v1).
 
 ---
 
@@ -177,9 +179,21 @@ The suite runs on synthetic signals with a known hypnogram, so it needs no data.
 
 ## Citing
 
-See `CITATION.cff`. The analyses in the accompanying paper live in a separate
+Signorelli L, Korchynska S, Ortiz C, Arena A, Wilhelm S, Boccara C. *Nyx: a
+flexible framework for sleep scoring across species, lifespan and modalities.*
+bioRxiv 2026. doi:[10.64898/2026.07.24.740558](https://doi.org/10.64898/2026.07.24.740558)
+
+Machine-readable metadata is in `CITATION.cff`. The analyses in the paper live in a separate
 repository, pinned to a specific nyx version.
 
 ## Licence
 
-MIT.
+GNU Lesser General Public License v3.0 or later — see [`LICENSE`](LICENSE),
+which incorporates the [GPL-3.0](https://www.gnu.org/licenses/gpl-3.0.txt) by
+reference.
+
+In short: use nyx freely, including inside closed-source software and
+commercially. But if you modify nyx **itself** and distribute the result, those
+modifications have to be published under the same licence. The intent is that
+improvements to the scoring method come back to the community rather than being
+kept private.

@@ -1,0 +1,84 @@
+cff-version: 1.2.0
+title: "Nyx: a flexible framework for sleep scoring across species, lifespan and modalities"
+message: "If you use this software, please cite the preprint below."
+type: software
+license: LGPL-3.0-or-later
+version: 0.1.0
+date-released: "2026-08-04"
+
+# Add this once the repository exists, so the "Cite this repository" button and
+# any Zenodo archive point at the right place:
+# repository-code: "https://github.com/<org>/nyx"
+
+abstract: >-
+  Nyx scores sleep from EEG and EMG without training data or manually scored
+  examples. It separates wake from sleep using EMG power, then splits sleep into
+  stages by clustering a principal component analysis of the EEG spectrogram.
+  Scoring is expressed as an ordered sequence of clustering steps, so rodent
+  three-stage scoring and human five-stage scoring run the same code and differ
+  only in configuration.
+
+keywords:
+  - sleep scoring
+  - polysomnography
+  - electroencephalography
+  - electromyography
+  - hypnogram
+  - unsupervised clustering
+  - electrophysiology
+
+authors:
+  - family-names: Signorelli
+    given-names: Letizia
+    orcid: "https://orcid.org/0009-0002-1834-7793"
+    affiliation: "Norwegian Centre for Molecular Biosciences and Medicine (NCMBM), Nordic EMBL Partnership, Oslo, Norway"
+  - family-names: Korchynska
+    given-names: Solomiia
+    orcid: "https://orcid.org/0000-0002-9991-3699"
+    affiliation: "Norwegian Centre for Molecular Biosciences and Medicine (NCMBM), Nordic EMBL Partnership, Oslo, Norway"
+  - family-names: Ortiz
+    given-names: Cantin
+    orcid: "https://orcid.org/0000-0001-9564-0059"
+    affiliation: "Norwegian Centre for Molecular Biosciences and Medicine (NCMBM), Nordic EMBL Partnership, Oslo, Norway; Department of Molecular Medicine, Institute of Basic Medical Sciences, University of Oslo, Oslo, Norway"
+  - family-names: Arena
+    given-names: Alessandro
+    orcid: "https://orcid.org/0000-0002-3192-2265"
+    affiliation: "Norwegian Centre for Molecular Biosciences and Medicine (NCMBM), Nordic EMBL Partnership, Oslo, Norway"
+  - family-names: Wilhelm
+    given-names: Sophia
+    orcid: "https://orcid.org/0000-0002-4035-6947"
+    affiliation: "Norwegian Centre for Molecular Biosciences and Medicine (NCMBM), Nordic EMBL Partnership, Oslo, Norway"
+  - family-names: Boccara
+    given-names: Charlotte
+    orcid: "https://orcid.org/0000-0001-7237-5109"
+    affiliation: "Norwegian Centre for Molecular Biosciences and Medicine (NCMBM), Nordic EMBL Partnership, Oslo, Norway; Department of Molecular Medicine, Institute of Basic Medical Sciences, University of Oslo, Oslo, Norway; Department of Neurology, Oslo University Hospital, Oslo, Norway"
+
+# Citing the preprint rather than the software is almost always what people
+# want, so GitHub's citation button will offer this instead. Replace with the
+# journal reference once it is published.
+preferred-citation:
+  type: article
+  title: "Nyx: a flexible framework for sleep scoring across species, lifespan and modalities"
+  journal: bioRxiv
+  year: 2026
+  doi: "10.64898/2026.07.24.740558"
+  url: "https://www.biorxiv.org/content/10.64898/2026.07.24.740558v1"
+  authors:
+    - family-names: Signorelli
+      given-names: Letizia
+      orcid: "https://orcid.org/0009-0002-1834-7793"
+    - family-names: Korchynska
+      given-names: Solomiia
+      orcid: "https://orcid.org/0000-0002-9991-3699"
+    - family-names: Ortiz
+      given-names: Cantin
+      orcid: "https://orcid.org/0000-0001-9564-0059"
+    - family-names: Arena
+      given-names: Alessandro
+      orcid: "https://orcid.org/0000-0002-3192-2265"
+    - family-names: Wilhelm
+      given-names: Sophia
+      orcid: "https://orcid.org/0000-0002-4035-6947"
+    - family-names: Boccara
+      given-names: Charlotte
+      orcid: "https://orcid.org/0000-0001-7237-5109"

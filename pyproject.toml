@@ -7,17 +7,26 @@ build-backend = "setuptools.build_meta"
 # is already taken on PyPI by an unrelated project.
 name = "nyx-sleep"
 version = "0.1.0"
-description = "Unsupervised sleep stage scoring (Wake/NREM/REM) from EEG and EMG recordings"
+description = "A flexible framework for sleep scoring across species, lifespan and modalities"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
-authors = [{ name = "Letizia Signorelli" }]
+license = { text = "LGPL-3.0-or-later" }
+authors = [
+    { name = "Letizia Signorelli" },
+    { name = "Solomiia Korchynska" },
+    { name = "Cantin Ortiz" },
+    { name = "Alessandro Arena" },
+    { name = "Sophia Wilhelm" },
+    { name = "Charlotte Boccara" },
+]
 keywords = ["sleep", "EEG", "EMG", "hypnogram", "electrophysiology", "neuroscience"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU Lesser General Public License v3 or later (LGPLv3+)",
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
 ]
 
 dependencies = [

@@ -51,6 +51,10 @@ run_pipeline_combined.ipynb
 # Superseded by the environment described in pyproject.toml.
 environment.yml
 
+# Guide to the pre-refactor notebooks. Superseded by examples/ and
+# params/README.md, and its examples contain internal file paths.
+NOTEBOOKS_GUIDE.md
+
 # ---------------------------------------------------------------------------
 # Tooling / editors / OS
 # ---------------------------------------------------------------------------
