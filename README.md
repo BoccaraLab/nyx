@@ -34,7 +34,7 @@ exercise on one carrying mains interference and saturated signal at both ends â€
 showing the signal check finding both problems and what fixing them is worth:
 
 ```
-clean recording                        MF1 0.994
+clean recording                        MF1 0.993
 messy recording, nothing fixed         MF1 0.813
 messy recording, notch + trim applied  MF1 0.993
 ```
@@ -198,6 +198,12 @@ thresholds â€” so it is shareable. See [`params/README.md`](params/README.md).
     "n_pcs": 4, "stage_order": ["REM", "NREM"] }
 ]
 ```
+
+`score_recording` runs this list, so going finer is a matter of adding a step
+rather than writing code. `mouse_substages.json` adds a third that subdivides
+NREM into NREM2, NREM3 and TR (transition); `human.json` runs four to reach five
+stages. `nyx.collapse(hypnogram, 3)` folds any of it back to WAKE/NREM/REM, so a
+substage run stays comparable against an ordinary three-stage reference.
 
 Shipped defaults: `mouse.json`, `mouse_weak_emg.json` (when the EMG does not
 separate cleanly), `rat.json`, `human.json`.

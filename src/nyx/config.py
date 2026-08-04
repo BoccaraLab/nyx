@@ -359,7 +359,7 @@ def build_run_record(
 
     resolved = dict(params or (config.params if config else {}))
     if steps:
-        resolved["steps"] = [_step_dict(step) for step in steps]
+        resolved["steps"] = _resolved_steps(resolved.get("steps") or [], steps)
     # Inline, not a path: a record that points at a params file is only as
     # reproducible as that file.
     record["params"] = resolved
@@ -377,6 +377,25 @@ def build_run_record(
     if recording_name:
         record.setdefault("output", {})["name"] = recording_name
     return record
+
+
+def _resolved_steps(declared: list, ran: list) -> list[dict[str, Any]]:
+    """Merge what a run resolved back into the step list from the params.
+
+    Only clustering steps are *run* -- the wake/sleep split is done by
+    ``classify_wake_sleep`` before the step engine sees anything. Replacing the
+    whole list with the ones that ran would drop it from the record, and a
+    record that cannot replay the wake/sleep split cannot replay the scoring.
+    So steps are matched by name and the rest are kept as written.
+    """
+    by_name = {}
+    for step in ran:
+        resolved = _step_dict(step)
+        by_name[resolved.get("name")] = resolved
+
+    out = [by_name.pop(spec.get("name"), spec) for spec in declared]
+    # A step that ran but was never declared (a caller passing its own list).
+    return out + list(by_name.values())
 
 
 def _step_dict(step) -> dict[str, Any]:

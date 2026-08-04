@@ -24,11 +24,18 @@ __all__ = ["GRANULARITIES", "collapse", "available_granularities"]
 #: 4-stage folds N1 into N2 (they are the hardest pair for human scorers to
 #: separate, and N1 is a small fraction of the night). 3-stage folds all NREM
 #: together, which is the vocabulary rodent scoring uses.
+#:
+#: ``TR`` is the transition stage the rodent substage recipe separates out. It
+#: is carved from NREM, so it folds back into NREM -- which is what lets a
+#: substage run still be compared against a three-stage rodent reference. At 4
+#: stages it joins NREM2, the lightest of the three, on the same reasoning that
+#: puts N1 there.
 GRANULARITIES: dict[int, dict[str, str]] = {
     5: {},
     4: {
         "NREM1": "NREM2",
         "N1": "NREM2",
+        "TR": "NREM2",
     },
     3: {
         "NREM1": "NREM",
@@ -37,6 +44,7 @@ GRANULARITIES: dict[int, dict[str, str]] = {
         "N1": "NREM",
         "N2": "NREM",
         "N3": "NREM",
+        "TR": "NREM",
     },
 }
 

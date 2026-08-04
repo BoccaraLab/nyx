@@ -41,9 +41,40 @@ def test_run_record_captures_the_decisions(synthetic_recording, params, tmp_path
     assert record["window"] == [0.0, 1800.0]
     assert record["decisions"]["emg"]["thresholds"] == result.wake_sleep.thresholds
     assert record["decisions"]["emg"]["source"] == result.wake_sleep.threshold_source
+
+    # These params carry a `steps` list, so the cluster mapping is recorded per
+    # step rather than once for the whole run.
+    split = next(s for s in record["params"]["steps"] if s["name"] == "split_sleep")
+    assert split["cluster_to_stage"] == {
+        str(k): v for k, v in result.staging.cluster_to_stage.items()
+    }
+
+
+def test_a_single_step_run_records_the_mapping_outside_the_steps(
+    synthetic_recording, params, tmp_path
+):
+    """Without a `steps` list there is nowhere per-step to put it."""
+    single = {k: v for k, v in params.items() if k != "steps"}
+    result, out = _saved(synthetic_recording, single, tmp_path)
+    record = json.loads((out / "run.json").read_text())
+
     assert record["decisions"]["cluster_to_stage"] == {
         str(k): v for k, v in result.staging.cluster_to_stage.items()
     }
+
+
+def test_the_wake_sleep_step_survives_in_the_record(
+    synthetic_recording, params, tmp_path
+):
+    """Only clustering steps are run, so only they come back from the step
+    engine. Recording just those would drop the wake/sleep split from the
+    record, and a record that cannot replay that cannot replay the scoring."""
+    _result, out = _saved(synthetic_recording, params, tmp_path)
+    record = json.loads((out / "run.json").read_text())
+
+    names = [s["name"] for s in record["params"]["steps"]]
+    assert names == [s["name"] for s in params["steps"]]
+    assert record["params"]["steps"][0]["method"] == "emg_threshold"
 
 
 def test_run_record_notes_the_version(synthetic_recording, params, tmp_path):
@@ -72,6 +103,30 @@ def test_run_record_reloads_as_a_config(synthetic_recording, params, tmp_path):
 def test_replaying_a_record_needs_no_interaction(synthetic_recording, params, tmp_path):
     """Re-running from the record must reproduce the scoring exactly."""
     first = nyx.score_recording(synthetic_recording, params, window=(0, 1800),
+                                verbose=False)
+    out = tmp_path / "run"
+    nyx.save_results(first, str(out))
+    record = json.loads((out / "run.json").read_text())
+
+    # No cluster_overrides: each step's resolved mapping is inside the recorded
+    # params, so replaying needs only the params and the thresholds.
+    second = nyx.score_recording(
+        synthetic_recording,
+        record["params"],
+        window=tuple(record["window"]),
+        emg_threshold=record["decisions"]["emg"]["thresholds"][1],
+        nosignal_threshold=record["decisions"]["emg"]["thresholds"][0],
+        verbose=False,
+    )
+
+    assert second.staging.stage_durations() == first.staging.stage_durations()
+
+
+def test_replaying_a_single_step_record_needs_no_interaction(
+    synthetic_recording, params, tmp_path
+):
+    single = {k: v for k, v in params.items() if k != "steps"}
+    first = nyx.score_recording(synthetic_recording, single, window=(0, 1800),
                                 verbose=False)
     out = tmp_path / "run"
     nyx.save_results(first, str(out))
@@ -134,8 +189,9 @@ def test_multi_step_record_carries_each_step_mapping(synthetic_recording, params
 
     record = build_run_record(None, params, steps=outcomes, window=(0, 100))
 
-    saved_step = record["params"]["steps"][0]
-    assert saved_step["name"] == "split_sleep"
+    saved_step = next(
+        s for s in record["params"]["steps"] if s["name"] == "split_sleep"
+    )
     assert saved_step["within"] == "SLEEP"
     assert set(saved_step["cluster_to_stage"].values()) <= {"REM", "NREM"}
 
@@ -146,7 +202,7 @@ def test_recorded_steps_reload_as_steps(synthetic_recording, params):
     record = build_run_record(None, params, steps=steps, window=(0, 100))
 
     rebuilt = [Step.from_dict(s) for s in record["params"]["steps"]]
-    assert rebuilt == steps
+    assert steps[0] in rebuilt
 
 
 def test_record_is_json_serialisable_with_numpy_values():

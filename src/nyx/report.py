@@ -43,7 +43,11 @@ CLUSTER_CMAP = "Set1"
 
 #: Stage order for hypnograms, top row first. NOSIGNAL sits above WAKE so that
 #: the rows run from "not scored" down through progressively deeper sleep.
-STAGE_ROW_ORDER = ("NOSIGNAL", "WAKE", "REM", "NREM1", "NREM", "NREM2", "NREM3")
+#: TR sits with the light NREM stages, above NREM2, since it is the shallowest
+#: of the three the rodent substage recipe separates.
+STAGE_ROW_ORDER = (
+    "NOSIGNAL", "WAKE", "REM", "NREM1", "NREM", "TR", "NREM2", "NREM3",
+)
 
 
 def _cluster_colour(index: int):

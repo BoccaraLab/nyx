@@ -24,6 +24,7 @@ __all__ = [
     "NREM2",
     "NREM3",
     "NREM",
+    "TR",
     "SLEEP",
     "STATE_NAMES",
     "COLORS",
@@ -42,6 +43,10 @@ NREM2 = -4
 NREM3 = -5
 NREM = -6
 SLEEP = -7
+#: Transition: the NREM a further step separates from NREM2 and NREM3 in the
+#: rodent substage recipe. It is a subdivision of NREM, so it collapses back
+#: into NREM -- see :mod:`nyx.granularity`.
+TR = -8
 
 STATE_NAMES: dict[int, str] = {
     NOSIGNAL: "NOSIGNAL",
@@ -53,6 +58,7 @@ STATE_NAMES: dict[int, str] = {
     NREM2: "NREM2",
     NREM3: "NREM3",
     NREM: "NREM",
+    TR: "TR",
     SLEEP: "SLEEP",
 }
 
@@ -62,6 +68,7 @@ STATE_NAMES: dict[int, str] = {
 COLORS: dict[str, str] = {
     "NOSIGNAL": "#000000",
     "UNCLASSIFIED": "#5f5e5f",
+    "TR": "#5f5e5f",
     "MICROAWAKE": "#cfb474",
     "QW": "#cfb474",
     "WAKE": "#F09E05",

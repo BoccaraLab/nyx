@@ -16,6 +16,7 @@ it means the same thing on their data.
 | `mouse_weak_emg.json` | mouse, when the EMG does not separate wake cleanly, or the recording is short — one clustering step recovers all three stages using EMG as a feature |
 | `rat.json` | rat EEG/EMG |
 | `human.json` | human PSG, five stages, three clustering steps |
+| `mouse_substages.json` | mouse, with NREM further split into NREM2, NREM3 and TR (transition) |
 | `mouse_scalogram.json` | `mouse.json` with the wavelet backend — see below |
 
 These are **starting points, not fixed recipes.** Run one recording, look at the
@@ -110,6 +111,24 @@ differ in how many steps they need, not in the code that runs them.
   "use_emg": false,             // add EMG power as an extra feature
   "stage_order": ["REM", "NREM"] }   // names clusters by centroid, lowest first
 ```
+
+`score_recording` runs this list. Steps with `method: "emg_threshold"` are the
+wake/sleep split, which happens before the clustering steps and is not repeated.
+A file with no `steps` falls back to a single clustering step driven by a
+`clustering` section.
+
+Adding a step is how you go finer. `mouse_substages.json` adds a third that
+subdivides NREM:
+
+```jsonc
+{ "name": "split_nrem", "within": "NREM", "method": "gmm", "n_clusters": 3,
+  "stage_order": ["TR", "NREM3", "NREM2"] }
+```
+
+`nyx.collapse(result.hypnogram, 3)` folds those back into plain NREM, so a
+substage run can still be compared against an ordinary three-stage rodent
+reference. It will not be *identical* to a two-step run — the extra step brings
+its own outlier rejection, so a few more epochs come out as NOSIGNAL.
 
 `stage_order` names clusters by position, which is stable. `cluster_to_stage`
 names them by id, which is stable too — nyx renumbers clusters by centroid so

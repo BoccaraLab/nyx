@@ -25,6 +25,29 @@ FIVE_STAGE = _hypno(
 )
 
 
+RODENT_SUBSTAGES = _hypno(
+    [("WAKE", 30), ("TR", 30), ("NREM2", 60), ("NREM3", 30), ("REM", 30)]
+)
+
+
+def test_rodent_substages_collapse_back_to_three_stages():
+    """TR is carved out of NREM, so it has to fold back into it.
+
+    Without this a substage run could not be compared against an ordinary
+    rodent reference, which is the only kind that exists.
+    """
+    result = collapse(RODENT_SUBSTAGES, 3)
+
+    assert list(result["label"]) == ["WAKE", "NREM", "REM"]
+    assert list(result["duration"]) == [30.0, 120.0, 30.0]
+
+
+def test_transition_joins_the_light_nrem_at_four_stages():
+    result = collapse(RODENT_SUBSTAGES, 4)
+
+    assert list(result["label"]) == ["WAKE", "NREM2", "NREM3", "REM"]
+
+
 def test_five_stage_is_unchanged():
     result = collapse(FIVE_STAGE, 5)
     assert list(result["label"]) == ["WAKE", "NREM1", "NREM2", "NREM3", "REM"]

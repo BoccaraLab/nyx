@@ -1,0 +1,74 @@
+{
+    "_comment": "mouse.json plus a third step that subdivides NREM into NREM2, NREM3 and TR (transition). Same idea as the human recipe: once a stage is isolated, refit a PCA inside just those epochs so the components describe what is left to resolve rather than the wake/sleep difference that has already been settled. Collapsing back to three stages recovers plain WAKE/NREM/REM, so a substage run can still be compared against an ordinary rodent reference: nyx.collapse(result.hypnogram, 3).",
+
+    "features": {
+        "method": "spectrogram"
+    },
+
+    "EEG": {
+        "min_freq": 0.5,
+        "max_freq": 40,
+        "binsize": 2,
+        "overlapratio": 0.5,
+        "time_smooth": 4,
+        "scaling": "density",
+        "detrend": "constant",
+        "mode": "psd",
+        "scale": "dB",
+        "normalized": "mean",
+        "notch": null,
+        "resample": null
+    },
+
+    "EMG": {
+        "min_freq": 30,
+        "max_freq": 100,
+        "binsize": 4,
+        "overlapratio": 0.5,
+        "time_smooth": 4,
+        "scaling": "density",
+        "detrend": "constant",
+        "mode": "psd",
+        "scale": "dB",
+        "normalized": "mean",
+        "notch": null,
+        "resample": null
+    },
+
+    "scoring": {
+        "pc_components": 6,
+        "min_duration": 4
+    },
+
+    "steps": [
+        {
+            "name": "wake_sleep",
+            "method": "emg_threshold",
+            "threshold": null,
+            "nosignal_threshold": 0.0
+        },
+        {
+            "_comment": "As mouse.json: NREM and REM out of sleep.",
+            "name": "split_sleep",
+            "within": "SLEEP",
+            "method": "hdbscan",
+            "pcs_to_use": [0, 1, 2, 3],
+            "use_emg": false,
+            "outlier_z_threshold": 6,
+            "hdbscan_min_cluster_size": 300,
+            "hdbscan_min_samples": 30,
+            "stage_order": ["REM", "NREM"]
+        },
+        {
+            "_comment": "Subdivide NREM. gmm with a fixed n_clusters rather than hdbscan: the three substages are not separated by a density gap the way NREM and REM are, so letting the algorithm decide how many there are gives a different count on every recording. stage_order runs from lowest to highest centroid on the first PC; this one is taken from the run it was developed on, and the sign of a principal component is arbitrary, so it is NOT a safe default. CHECK THE PER-CLUSTER PSDs and reorder if they disagree -- substage boundaries are far less clear-cut than NREM/REM, and this is the step most worth overriding.",
+            "name": "split_nrem",
+            "within": "NREM",
+            "method": "gmm",
+            "n_clusters": 3,
+            "pcs_to_use": [0, 1, 2],
+            "use_emg": false,
+            "outlier_z_threshold": 6,
+            "stage_order": ["TR", "NREM3", "NREM2"]
+        }
+    ]
+}

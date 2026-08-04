@@ -150,17 +150,35 @@ def test_clusters_with_no_stage_name_are_left_unscored_and_warned_about(
     into dozens of clusters, and everything past the second name silently
     became NREM.
     """
-    params = {**nyx.demo_params(), "clustering": {"method": "kmeans", "n_clusters": 5}}
+    params = {**nyx.demo_params()}
+    params["steps"] = [
+        params["steps"][0],
+        {**params["steps"][1], "n_clusters": 5},   # still only two names
+    ]
 
     with pytest.warns(UserWarning, match="no stage name"):
         result = nyx.score_recording(synthetic_recording, params,
                                      window=(0, 2400), verbose=False)
 
-    durations = result.staging.stage_durations()
-    assert durations.get("NOSIGNAL", 0) > 0, "the unnamed clusters must be unscored"
-    # The two named clusters are still named; the extras keep their real ids in
-    # stage_labels, which is what a following step would work from.
-    assert {"C2", "C3", "C4"} <= set(result.staging.stage_labels)
+    # The extras keep provisional names rather than becoming NREM.
+    assert {"C2", "C3", "C4"} <= set(result.hypnogram["label"])
+    assert "NREM" in set(result.hypnogram["label"])
+
+
+def test_a_named_multi_stage_vocabulary_does_not_warn(synthetic_recording, recwarn):
+    """NREM2/NREM3/TR are legitimate names, not unnamed clusters."""
+    params = {**nyx.demo_params()}
+    params["steps"] = [
+        params["steps"][0],
+        {**params["steps"][1], "method": "kmeans", "n_clusters": 3,
+         "stage_order": ["REM", "NREM3", "NREM2"]},
+    ]
+
+    result = nyx.score_recording(synthetic_recording, params, window=(0, 2400),
+                                 verbose=False)
+
+    assert not [w for w in recwarn if "no stage name" in str(w.message)]
+    assert {"NREM2", "NREM3"} <= set(result.hypnogram["label"])
 
 
 def test_cluster_plot_decimates_without_changing_the_clustering(synthetic_recording):

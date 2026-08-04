@@ -153,6 +153,164 @@ def test_total_time_is_conserved_across_steps(synthetic_recording, params, score
     assert after == pytest.approx(before, rel=0.02)
 
 
+# ---------------------------------------------------------------------------
+# elliptic numbers its clusters by meaning, not by position
+# ---------------------------------------------------------------------------
+
+
+def test_elliptic_maps_the_dense_cluster_first(synthetic_recording, params, scored):
+    """Cluster 0 is the bulk and cluster 1 the tail, whatever their centroids.
+
+    This is the whole point of using elliptic for the human wake/sleep split:
+    sleep is one dense blob and wake is the scattered minority. Ordering by
+    centroid instead flips the mapping depending on which side of the first
+    component the tail happens to sit -- which varies by recording, and on a
+    dodh night put 90% of the recording into WAKE.
+    """
+    emg, wake_sleep = scored
+    step = Step("wake_sleep", within="SLEEP", method="elliptic", use_emg=True,
+                pcs_to_use=[0, 1], stage_order=["SLEEP", "WAKE"],
+                options={"elliptic_contamination": 0.1,
+                         "elliptic_support_fraction": 0.75})
+
+    outcome = run_step(synthetic_recording, params, wake_sleep.hypnogram, step,
+                       emg=emg)
+
+    sizes = outcome.clusters.sizes()
+    assert outcome.cluster_to_stage[0] == "SLEEP"
+    assert outcome.cluster_to_stage[1] == "WAKE"
+    # The tail is the contamination fraction, so it must be the smaller one.
+    assert sizes[1] < sizes[0]
+
+
+def test_elliptic_cluster_ids_are_not_renumbered(synthetic_recording, params, scored):
+    """Canonicalising by centroid would throw away a stronger guarantee."""
+    from nyx.pipeline import cluster_sleep, compute_sleep_pca
+
+    emg, wake_sleep = scored
+    pca = compute_sleep_pca(synthetic_recording, params, wake_sleep)
+    clusters = cluster_sleep(
+        pca, wake_sleep,
+        clustering={"method": "elliptic", "pcs_to_use": [0, 1], "use_emg": True,
+                    "elliptic_contamination": 0.1,
+                    "canonical_cluster_ids": True},
+        emg=emg,
+    )
+
+    sizes = clusters.sizes()
+    assert sizes[0] > sizes[1], "cluster 0 must stay the dense component"
+
+
+# ---------------------------------------------------------------------------
+# Driven from the params
+# ---------------------------------------------------------------------------
+
+
+def test_score_recording_runs_the_steps_in_the_params(synthetic_recording):
+    """Every shipped params file carries a `steps` list; it has to be honoured.
+
+    This is what makes rodent substages and human five-stage scoring reachable
+    through the ordinary entry point rather than by calling run_steps by hand.
+    """
+    import nyx
+
+    params = {**nyx.demo_params()}
+    params["steps"] = [
+        params["steps"][0],
+        params["steps"][1],
+        {"name": "split_nrem", "within": "NREM", "method": "kmeans",
+         "n_clusters": 2, "pcs_to_use": [0, 1],
+         "stage_order": ["NREM2", "NREM3"]},
+    ]
+
+    result = nyx.score_recording(synthetic_recording, params, window=(0, 2400),
+                                 verbose=False)
+
+    labels = set(result.hypnogram["label"])
+    assert {"NREM2", "NREM3"} <= labels
+    assert "NREM" not in labels, "the third step should have consumed it"
+    assert len(result.steps) == 2, "the emg_threshold step is not a clustering step"
+
+
+def test_substages_collapse_back_to_the_ordinary_scoring(synthetic_recording):
+    """A substage run must still be comparable against a 3-stage reference."""
+    import nyx
+
+    two_step = nyx.demo_params()
+    three_step = {**two_step}
+    three_step["steps"] = [
+        *two_step["steps"],
+        {"name": "split_nrem", "within": "NREM", "method": "kmeans",
+         "n_clusters": 3, "pcs_to_use": [0, 1],
+         "stage_order": ["TR", "NREM3", "NREM2"]},
+    ]
+
+    plain = nyx.score_recording(synthetic_recording, two_step, window=(0, 2400),
+                                verbose=False)
+    subs = nyx.score_recording(synthetic_recording, three_step, window=(0, 2400),
+                               verbose=False)
+    collapsed = nyx.collapse(subs.hypnogram, 3)
+
+    assert {"TR", "NREM2", "NREM3"} <= set(subs.hypnogram["label"])
+    assert set(collapsed["label"]) <= {"WAKE", "NREM", "REM", "NOSIGNAL"}
+
+    def nrem_seconds(hypnogram):
+        return sum(float(d) for d, l in zip(hypnogram["duration"], hypnogram["label"])
+                   if l == "NREM")
+
+    # Not identical: the extra step brings its own outlier rejection, so a few
+    # epochs become NOSIGNAL that the two-step run scored.
+    assert nrem_seconds(collapsed) == pytest.approx(
+        nrem_seconds(plain.hypnogram), rel=0.02
+    )
+
+
+def test_the_params_emg_threshold_is_used(synthetic_recording):
+    """human.json sets a deliberately permissive threshold so everything lands
+    in SLEEP and a clustering step splits wake off. Auto-fitting instead would
+    quietly do something else."""
+    import nyx
+
+    params = {**nyx.demo_params()}
+    params["steps"] = [
+        {"name": "wake_sleep", "method": "emg_threshold", "threshold": 1.5},
+        params["steps"][1],
+    ]
+
+    result = nyx.score_recording(synthetic_recording, params, window=(0, 2400),
+                                 verbose=False)
+
+    assert result.wake_sleep.threshold == 1.5
+    assert result.wake_sleep.threshold_source == "manual"
+    # Above the top of the min-max scaled power, so nothing is wake.
+    assert "WAKE" not in set(result.wake_sleep.hypnogram["label"])
+
+
+def test_an_explicit_threshold_still_wins_over_the_params(synthetic_recording):
+    import nyx
+
+    params = {**nyx.demo_params()}
+    params["steps"] = [
+        {"name": "wake_sleep", "method": "emg_threshold", "threshold": 1.5},
+        params["steps"][1],
+    ]
+
+    result = nyx.score_recording(synthetic_recording, params, window=(0, 2400),
+                                 emg_threshold=0.4, verbose=False)
+
+    assert result.wake_sleep.threshold == 0.4
+
+
+def test_the_emg_threshold_step_is_not_run_twice(synthetic_recording):
+    """classify_wake_sleep has already done it by the time the steps are read."""
+    import nyx
+
+    result = nyx.score_recording(synthetic_recording, nyx.demo_params(),
+                                 window=(0, 2400), verbose=False)
+
+    assert [outcome.step.name for outcome in result.steps] == ["split_sleep"]
+
+
 def test_step_on_a_missing_label_is_reported_clearly(
     synthetic_recording, params, scored
 ):

@@ -50,6 +50,7 @@ from nyx.scoring import (
     prepare_epoch_data,
     save_hypno_with_padding,
 )
+from nyx.steps import run_steps
 from nyx.thresholds import find_emg_threshold
 from nyx.types import (
     Agreement,
@@ -116,6 +117,10 @@ class ScoringResult:
     #: The reference scoring, trimmed to the analysis window, when one was
     #: given. Kept so figures can show it beside nyx's own hypnogram.
     reference: dict[str, np.ndarray] | None = None
+    #: One :class:`~nyx.steps.StepOutcome` per clustering step, when the params
+    #: carried a ``steps`` list. Empty for the single-step path. :attr:`pca` and
+    #: :attr:`clusters` are the last step's, which is what the figures show.
+    steps: list = field(default_factory=list)
 
     @property
     def hypnogram(self) -> dict[str, np.ndarray]:
@@ -352,7 +357,10 @@ def cluster_sleep(
         features_scaled[~outlier_mask], scaler, settings
     )
 
-    if settings.get("canonical_cluster_ids", True):
+    # elliptic already numbers its clusters meaningfully -- 0 is the dense bulk,
+    # 1 the tail -- which is a stronger guarantee than ordering by centroid, and
+    # renumbering would throw it away.
+    if settings.get("canonical_cluster_ids", True) and settings["method"] != "elliptic":
         inlier_labels, centers = _canonicalise_cluster_ids(inlier_labels, centers)
 
     labels = np.full(len(features_scaled), _STAGE_TO_INT["NOSIGNAL"], dtype=int)
@@ -470,10 +478,18 @@ def assign_stages(
     short to be a real bout -- are not applied here. They belong to the params'
     ``postprocess`` list; see :mod:`nyx.postprocess`.
     """
-    ordered = sorted(
-        clusters.unique_labels, key=lambda cid: clusters.centers[cid, 0]
-    )
+    if clusters.params.get("method") == "elliptic":
+        # Its two clusters are "the bulk" and "the tail", in that order -- a
+        # meaning the centroid does not carry. Ordering by centroid instead
+        # flips the mapping depending on which side of the first component the
+        # tail happens to sit, which is arbitrary and varies by recording.
+        ordered = sorted(clusters.unique_labels)
+    else:
+        ordered = sorted(
+            clusters.unique_labels, key=lambda cid: clusters.centers[cid, 0]
+        )
     cluster_to_stage: dict[int, str] = {}
+    unnamed: list[int] = []
     for position, cluster_id in enumerate(ordered):
         if position < len(stage_order):
             cluster_to_stage[int(cluster_id)] = str(stage_order[position])
@@ -481,6 +497,7 @@ def assign_stages(
             # More clusters than names: leave the extras unnamed rather than
             # silently folding them into the last stage.
             cluster_to_stage[int(cluster_id)] = f"C{int(cluster_id)}"
+            unnamed.append(int(cluster_id))
 
     if overrides:
         unknown = set(overrides) - set(cluster_to_stage)
@@ -490,6 +507,21 @@ def assign_stages(
                 f"Clusters found: {sorted(cluster_to_stage)}."
             )
         cluster_to_stage.update({int(k): str(v) for k, v in overrides.items()})
+        unnamed = [cid for cid in unnamed if cid not in overrides]
+
+    if unnamed:
+        covered = sum(int((clusters.labels == cid).sum()) for cid in unnamed)
+        share = 100 * covered / max(len(clusters.features_scaled), 1)
+        warnings.warn(
+            f"Clusters {unnamed} have no stage name, covering {share:.1f}% of the "
+            f"epochs. stage_order names {len(stage_order)} ({list(stage_order)}) but "
+            f"the clustering produced {len(cluster_to_stage)}. They keep provisional "
+            f"names (C0, C1, ...) and are left unscored in the WAKE/NREM/REM "
+            f"hypnogram. Either name them all, or change the clustering settings so "
+            f"it produces as many clusters as you have names -- with hdbscan that "
+            f"usually means raising hdbscan_min_cluster_size.",
+            stacklevel=2,
+        )
 
     # Stage name per covered epoch. Names rather than integer codes, so that
     # vocabularies beyond WAKE/NREM/REM (NREM1/2/3, or unnamed clusters) survive.
@@ -506,26 +538,9 @@ def assign_stages(
     # are left unscored here; `stage_labels` above keeps their real names, which
     # is what multi-step scoring builds on.
     stages_valid = np.full(len(clusters.features_scaled), _STAGE_TO_INT["NOSIGNAL"], dtype=int)
-    unnamed = []
     for cluster_id, stage in cluster_to_stage.items():
-        if stage not in _STAGE_TO_INT:
-            unnamed.append((cluster_id, int((clusters.labels == cluster_id).sum())))
-            continue
-        stages_valid[clusters.labels == cluster_id] = _STAGE_TO_INT[stage]
-
-    if unnamed:
-        unscored = sum(count for _, count in unnamed)
-        share = 100 * unscored / max(len(clusters.features_scaled), 1)
-        warnings.warn(
-            f"{len(unnamed)} of {len(cluster_to_stage)} clusters have no stage name, "
-            f"covering {share:.1f}% of the epochs, which are left unscored. "
-            f"stage_order names {len(stage_order)} cluster(s) ({list(stage_order)}) but "
-            f"the clustering produced {len(cluster_to_stage)}. Either name them all "
-            f"(stage_order or cluster_overrides), or change the clustering settings so "
-            f"it produces as many clusters as you have names -- with hdbscan that "
-            f"usually means raising hdbscan_min_cluster_size.",
-            stacklevel=2,
-        )
+        if stage in _STAGE_TO_INT:
+            stages_valid[clusters.labels == cluster_id] = _STAGE_TO_INT[stage]
 
     sleep_stages = np.full(len(clusters.valid_mask), _STAGE_TO_INT["NOSIGNAL"], dtype=int)
     sleep_stages[clusters.valid_mask] = stages_valid
@@ -655,6 +670,16 @@ def score_recording(
     if verbose:
         print(f"Analysing {windowed.name or 'recording'}  window {start:g}-{end:g}s")
 
+    # A `method: "emg_threshold"` step in the params carries the wake/sleep
+    # thresholds. human.json sets a deliberately permissive one so that
+    # everything lands in SLEEP and a later clustering step splits wake off;
+    # auto-fitting there instead would quietly do the wrong thing.
+    declared = _emg_threshold_step(params)
+    if emg_threshold is None:
+        emg_threshold = declared.get("threshold")
+    if nosignal_threshold == 0.0:
+        nosignal_threshold = float(declared.get("nosignal_threshold") or 0.0)
+
     emg = compute_emg_features(windowed, params, return_in_uV=return_in_uV)
     wake_sleep = classify_wake_sleep(
         emg,
@@ -667,18 +692,38 @@ def score_recording(
             f"  EMG threshold: {wake_sleep.threshold:.3f} ({wake_sleep.threshold_source})"
         )
 
-    pca = compute_sleep_pca(windowed, params, wake_sleep, return_in_uV=return_in_uV)
-    clusters = cluster_sleep(pca, wake_sleep, clustering=params, emg=emg)
-    if verbose:
-        print(f"  clusters: {clusters.sizes()}")
+    outcomes: list = []
+    clustering_steps = _clustering_steps(params)
 
-    staging = assign_stages(
-        clusters,
-        pca,
-        wake_sleep,
-        stage_order=stage_order,
-        overrides=cluster_overrides,
-    )
+    if clustering_steps:
+        # Declarative path: the params say how many clustering steps to run and
+        # what each one splits. Rodent substages, human five-stage scoring and
+        # plain NREM/REM are the same code, differing only in this list.
+        outcomes = run_steps(
+            windowed, params, wake_sleep.hypnogram, clustering_steps,
+            emg=emg, return_in_uV=return_in_uV, verbose=verbose,
+        )
+        last = outcomes[-1]
+        pca, clusters = last.pca, last.clusters
+        staging = Staging(
+            hypnogram=last.hypnogram,
+            cluster_to_stage=last.cluster_to_stage,
+            stage_signal=np.array([]),
+            stage_labels=last.labels,
+        )
+    else:
+        pca = compute_sleep_pca(windowed, params, wake_sleep, return_in_uV=return_in_uV)
+        clusters = cluster_sleep(pca, wake_sleep, clustering=params, emg=emg)
+        if verbose:
+            print(f"  clusters: {clusters.sizes()}")
+
+        staging = assign_stages(
+            clusters,
+            pca,
+            wake_sleep,
+            stage_order=stage_order,
+            overrides=cluster_overrides,
+        )
 
     rules = rules_from_params(params)
     if rules:
@@ -715,7 +760,30 @@ def score_recording(
         total_duration=float(total_duration),
         params=params,
         reference=trimmed_reference,
+        steps=outcomes,
     )
+
+
+def _emg_threshold_step(params: dict) -> dict:
+    """The ``emg_threshold`` step's settings, or an empty dict."""
+    for spec in params.get("steps", []):
+        if spec.get("method") == "emg_threshold":
+            return {k: v for k, v in spec.items() if not k.startswith("_")}
+    return {}
+
+
+def _clustering_steps(params: dict) -> list:
+    """The clustering steps from the params, if there are any.
+
+    ``method: "emg_threshold"`` is the wake/sleep split, which
+    :func:`classify_wake_sleep` has already done by the time this is read, so it
+    is dropped here rather than run twice.
+    """
+    from nyx.steps import steps_from_params
+
+    return [
+        step for step in steps_from_params(params) if step.method != "emg_threshold"
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -746,7 +814,8 @@ def save_results(
     ----------
     steps
         The steps as run, for a multi-step scoring. Their resolved cluster
-        mappings go into the run record.
+        mappings go into the run record. Defaults to the ones
+        :func:`score_recording` ran, so it rarely needs passing.
     granularities
         Extra stage counts to write, e.g. ``[4, 3]`` alongside a 5-stage
         scoring. Written as ``hypnogram_4stage.csv`` and so on.
@@ -756,6 +825,9 @@ def save_results(
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(os.path.join(output_dir, "plots"), exist_ok=True)
     start, end = result.window
+
+    if steps is None:
+        steps = result.steps or None
 
     run_config = config if isinstance(config, RunConfig) else None
     record = build_run_record(
