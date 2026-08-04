@@ -341,12 +341,28 @@ def compare_sleep(auto_data, manual_data, label_order = ['WAKE','QW','REM','NREM
     }, index=label_order)
 
     total_support = metrics_df['support'].sum()
-    metrics_overall = pd.Series({
-        'precision': np.average(precisions, weights=supports_dur) if total_support > 0 else 0.0,
-        'recall': np.average(recalls, weights=supports_dur) if total_support > 0 else 0.0,
-        'f1-score': np.average(f1s, weights=supports_dur) if total_support > 0 else 0.0,
-        'support': total_support
-    }, name='weighted avg')
+
+    # Macro (unweighted) averages. A weighted average lets the dominant stage
+    # hide poor performance on a rare one -- REM is a small fraction of a
+    # recording, so weighting by support makes missing it look cheap. MF1, the
+    # macro F1, is the headline number.
+    #
+    # Averaged over the stages actually present in the reference: scoring a
+    # recording that contains no REM should not be penalised for a stage that
+    # was never there to find.
+    present = supports_dur > 0
+    if present.any():
+        metrics_overall = pd.Series({
+            'precision': float(np.mean(precisions[present])),
+            'recall': float(np.mean(recalls[present])),
+            'f1-score': float(np.mean(f1s[present])),
+            'support': total_support,
+        }, name='macro avg')
+    else:
+        metrics_overall = pd.Series(
+            {'precision': 0.0, 'recall': 0.0, 'f1-score': 0.0, 'support': 0.0},
+            name='macro avg',
+        )
 
     results = {
         'y_manual': y_manual_ag,
@@ -357,7 +373,8 @@ def compare_sleep(auto_data, manual_data, label_order = ['WAKE','QW','REM','NREM
         'confusion_matrix': cm,
         'metrics_df': metrics_df,
         'accuracy': float(acc),
-        'kappa': float(kappa)
+        'kappa': float(kappa),
+        'mf1': float(metrics_overall['f1-score']),
     }
 
     # Plotting is complex with non-uniform epochs, so it's disabled for now.
@@ -367,12 +384,13 @@ def compare_sleep(auto_data, manual_data, label_order = ['WAKE','QW','REM','NREM
     # print nicely
     if verbose:
         print("=== Summary metrics (aggregated, fine-grained comparison) ===")
-        print(f"Accuracy: {results['accuracy']:.3f}    Cohen's kappa: {results['kappa']:.3f}\n")
+        print(f"MF1: {results['mf1']:.3f}    Accuracy: {results['accuracy']:.3f}    "
+              f"Cohen's kappa: {results['kappa']:.3f}\n")
         print(metrics_df.to_string(formatters={"precision": "{:.3f}".format,
                                                "recall": "{:.3f}".format,
                                                "f1-score": "{:.3f}".format,
                                                "support": "{:.1f}s".format}))
-        print("\nWeighted average (by support):")
+        print("\nMacro average (unweighted, over stages present in the reference):")
         print(metrics_overall.to_frame().T.map(lambda x: f"{x:.3f}" if isinstance(x, (float,np.floating)) else x))
         print("\nConfusion matrix (rows=true, cols=predicted, values are in seconds):")
         print(pd.DataFrame(cm, index=label_order, columns=label_order).round(1).to_string())

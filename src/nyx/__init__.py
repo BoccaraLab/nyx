@@ -30,6 +30,7 @@ To stop partway and adjust something, call the steps yourself -- see
 __version__ = "0.1.0"
 
 from nyx.config import RunConfig, load_config, load_json, load_params
+from nyx.demo import demo_messy_recording, demo_params, demo_recording
 from nyx.granularity import collapse
 from nyx.inspect import SignalCheck, check_signals
 from nyx.io import read_annotations, read_recording
@@ -47,6 +48,7 @@ from nyx.pipeline import (
     score_recording,
 )
 from nyx.preprocessing import apply_notch
+from nyx.report import plot_scoring_overview, plot_summary, save_report
 from nyx.steps import Refinement, Step, run_step, run_steps
 from nyx.types import (
     Agreement,
@@ -76,6 +78,14 @@ __all__ = [
     "run_step",
     "run_steps",
     "collapse",
+    # try it without any data
+    "demo_recording",
+    "demo_messy_recording",
+    "demo_params",
+    # figures
+    "plot_summary",
+    "save_report",
+    "plot_scoring_overview",
     # step 0: look at the signal
     "check_signals",
     "SignalCheck",

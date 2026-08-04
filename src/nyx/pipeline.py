@@ -138,6 +138,9 @@ class ScoringResult:
     window: tuple[float, float] = (0.0, 0.0)
     total_duration: float = 0.0
     params: dict[str, Any] = field(default_factory=dict)
+    #: The reference scoring, trimmed to the analysis window, when one was
+    #: given. Kept so figures can show it beside nyx's own hypnogram.
+    reference: dict[str, np.ndarray] | None = None
 
     @property
     def hypnogram(self) -> dict[str, np.ndarray]:
@@ -693,7 +696,9 @@ def score_recording(
             print(f"  {stage:<10} {seconds:9.1f}s ({100 * seconds / total:.1f}%)")
 
     agreement = None
+    trimmed_reference = None
     if reference is not None:
+        trimmed_reference = trim_manual_scores(reference, start, end)
         agreement = evaluate(
             staging, reference, window=(start, end), verbose=verbose
         )
@@ -709,6 +714,7 @@ def score_recording(
         window=(float(start), float(end)),
         total_duration=float(total_duration),
         params=params,
+        reference=trimmed_reference,
     )
 
 
@@ -724,6 +730,7 @@ def save_results(
     save_emg_power: bool = True,
     steps: list | None = None,
     granularities: Sequence[int] | None = None,
+    plots: bool = True,
 ) -> str:
     """Write the hypnograms, run record and metrics of a run to ``output_dir``.
 
@@ -812,5 +819,18 @@ def save_results(
             handle.write(result.agreement.summary())
         with open(os.path.join(output_dir, "agreement.pkl"), "wb") as handle:
             pickle.dump(result.agreement, handle)
+
+    if plots:
+        from nyx.report import save_report
+
+        # Plotting must never lose a result that has already been computed.
+        try:
+            save_report(result, output_dir)
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(
+                f"Scoring succeeded but the figures could not be drawn: "
+                f"{type(exc).__name__}: {exc}",
+                stacklevel=2,
+            )
 
     return output_dir

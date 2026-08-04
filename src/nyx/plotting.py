@@ -42,8 +42,14 @@ def _setup_xaxis(ax, max_time, plot_from_time, xaxis_format):
     ax.set_xticklabels(tick_labels)
 
 
-def plot_hypnogram(epoch_data, possible_labels, title, savepath=None, ax=None, plot_from_time=0., xaxis_format="Seconds", linear=False):
-    """Generalized hypnogram plotting function."""
+def plot_hypnogram(epoch_data, possible_labels, title, savepath=None, ax=None, plot_from_time=0., xaxis_format="Seconds", linear=False, drop_absent=True):
+    """Generalized hypnogram plotting function.
+
+    ``possible_labels`` is given top row first. Set ``drop_absent=False`` to
+    keep rows for stages that do not occur -- needed when two hypnograms are
+    drawn one above the other, since they only line up if both use the same
+    rows.
+    """
     if not all(col in epoch_data.columns for col in ['time', 'duration', 'label']):
         raise ValueError("DataFrame must contain 'time', 'duration', and 'label' columns.")
 
@@ -51,8 +57,11 @@ def plot_hypnogram(epoch_data, possible_labels, title, savepath=None, ax=None, p
     duration = epoch_data['duration'].values
     labels = epoch_data['label'].values
 
-    present_labels = np.unique(labels)
-    filtered_possible_labels = [label for label in possible_labels if label in present_labels]
+    if drop_absent:
+        present_labels = np.unique(labels)
+        filtered_possible_labels = [label for label in possible_labels if label in present_labels]
+    else:
+        filtered_possible_labels = list(possible_labels)
     reversed_labels = list(reversed(filtered_possible_labels))
     label_to_int = {label: idx for idx, label in enumerate(reversed_labels)}
 
@@ -149,11 +158,17 @@ def generate_custom_plot(config):
             ax = fig.add_subplot(gs[i, 0])
             axes.append(ax)
 
+    max_points = config.get("max_points", 4000)
+
     for i, subplot in enumerate(config["subplots"]):
         if subplot["type"] == "trace":
             ax = axes[i]
             x, y = subplot["data"]
-            ax.plot(x, y, color=subplot.get("color", "black"), lw=subplot.get("lw", 1), label=subplot.get("label", None))
+            # A long recording is millions of samples; the envelope keeps
+            # spikes visible at a few thousand points.
+            x_plot, y_plot = decimate_envelope(x, y, max_points)
+            ax.plot(x_plot, y_plot, color=subplot.get("color", "black"),
+                    lw=subplot.get("lw", 1), label=subplot.get("label", None))
             if "threshold" in subplot:
                 ax.axhline(subplot["threshold"], color="red", lw=2, linestyle="--", label="Threshold")
             ax.set_ylabel(subplot.get("label", ""))
@@ -168,9 +183,18 @@ def generate_custom_plot(config):
             ax, ax_colorbar = axes[i]
             frequencies, times, spectrogram = subplot["data"]
             im = ax.pcolormesh(times, frequencies, spectrogram, shading="nearest", cmap=subplot.get("palette", "jet"), rasterized=True)
-            im.set_clim(*subplot.get("im_range", [None, None]))
+            im_range = subplot.get("im_range")
+            if im_range is None:
+                # Robust limits: a few saturated bins otherwise wash it out.
+                finite = spectrogram[np.isfinite(spectrogram)]
+                im_range = np.percentile(finite, [5, 99]) if finite.size else (None, None)
+            im.set_clim(*im_range)
             fig.colorbar(im, cax=ax_colorbar, orientation="vertical", label=subplot.get("label", ""))
-            ax.set_ylabel("Frequency (Hz)")
+            ax.set_ylabel(subplot.get("ylabel", "Frequency (Hz)"))
+            ax.set_xlim(times[0], times[-1])
+            ax.set_xticks([])
+            for spine in ax.spines.values():
+                spine.set_visible(False)
 
         elif subplot["type"] == "hypnogram":
             ax = axes[i]
@@ -181,10 +205,40 @@ def generate_custom_plot(config):
                 ax=ax,
                 plot_from_time=subplot.get("plot_from_time", 0.),
                 xaxis_format=subplot.get("xaxis_format", "Seconds"),
-                linear=subplot.get("linear", False)
+                linear=subplot.get("linear", False),
+                drop_absent=subplot.get("drop_absent", True),
             )
+            if not subplot.get("show_xaxis", i == len(config["subplots"]) - 1):
+                ax.set_xlabel('')
+                ax.set_xticklabels([])
 
-    ax.set_xlabel("Time (s)")
+    if config.get("suptitle"):
+        fig.suptitle(config["suptitle"], fontweight="bold", fontsize=12)
+    return fig
+
+
+def decimate_envelope(x, y, max_points: int = 4000):
+    """Reduce a trace to about ``max_points`` while keeping its envelope.
+
+    Plain subsampling drops the spikes that make artefacts visible, so each
+    output block contributes both its minimum and its maximum.
+    """
+    x = np.asarray(x)
+    y = np.asarray(y)
+    n = len(y)
+    if max_points <= 0 or n <= max_points:
+        return x, y
+
+    n_blocks = max(max_points // 2, 1)
+    block = n // n_blocks
+    if block < 2:
+        return x, y
+
+    usable = n_blocks * block
+    blocks = y[:usable].reshape(n_blocks, block)
+    out = np.empty(n_blocks * 2, dtype=float)
+    out[0::2], out[1::2] = blocks.min(axis=1), blocks.max(axis=1)
+    return np.repeat(x[:usable:block], 2), out
 
 def plot_reconstructed_spectrogram(reconstructed_spectrogram, frequencies, times, time_window=None, title="Reconstructed Spectrogram", savepath=None, im_range=[0, 1]):
     """

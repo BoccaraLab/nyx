@@ -6,6 +6,10 @@
 rerun/
 results/
 outputs/
+
+# Written by examples/run_demo.py. Regenerate with `python examples/run_demo.py`
+# rather than committing the figures.
+examples/demo_output/
 *.npy
 *.pkl
 

@@ -23,6 +23,54 @@ conda activate nyx
 pip install -e ".[notebooks]"
 ```
 
+## Try it without any data
+
+```bash
+python examples/run_demo.py
+```
+
+No downloads, no data access. It scores a synthetic recording, then repeats the
+exercise on one carrying mains interference and saturated signal at both ends —
+showing the signal check finding both problems and what fixing them is worth:
+
+```
+clean recording                        MF1 0.994
+messy recording, nothing fixed         MF1 0.813
+messy recording, notch + trim applied  MF1 0.993
+```
+
+Every figure lands in `examples/demo_output/`; start with `plots/summary.png`.
+Or from Python:
+
+```python
+import nyx
+
+recording, reference = nyx.demo_recording()
+result = nyx.score_recording(recording, nyx.demo_params(), reference=reference)
+print(result.agreement.summary())
+```
+
+Good for checking an installation and for following the tutorial. **Not** a
+measure of how well nyx works — the signal is synthesised to contain exactly
+the structure nyx looks for, so it scores near-perfectly by construction. Real
+EEG is far messier. For an honest assessment, run one of the public datasets
+below.
+
+## What a run produces
+
+`save_results` writes the hypnogram, the run record, and a figure covering the
+whole run — EMG threshold, PCA components, clusters, per-cluster spectra, time
+per stage, confusion matrix and hypnogram — plus each panel separately.
+
+The per-cluster spectra are the panel worth checking every time: NREM should
+carry more low-frequency power than REM, and if it does not, the stage
+assignment is wrong however clean the clusters look.
+
+Agreement is reported as **MF1**, the unweighted mean of the per-stage F1
+scores. Unweighted on purpose: REM is a small fraction of any recording, so
+weighting by duration lets good wake/NREM performance hide a method that misses
+REM entirely.
+
 ## Score a recording
 
 ```python

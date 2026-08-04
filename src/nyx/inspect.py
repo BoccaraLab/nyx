@@ -129,18 +129,35 @@ class SignalCheck:
 
         n = len(self.previews)
         figsize = figsize or (9 * n, 10)
-        fig, axes = plt.subplots(4, n, figsize=figsize, squeeze=False)
+
+        # Give each colorbar its own grid column, as generate_custom_plot does.
+        # Attaching a colorbar to the axes instead steals width from it, which
+        # leaves the spectrograms narrower than the traces above them and the
+        # time axes no longer lining up.
+        fig = plt.figure(figsize=figsize)
+        grid = fig.add_gridspec(4, 2 * n, width_ratios=[30, 1] * n,
+                                wspace=0.08, hspace=0.3)
+        axes = [[fig.add_subplot(grid[row, 2 * col]) for col in range(n)]
+                for row in range(4)]
+        colorbar_axes = [[fig.add_subplot(grid[row, 2 * col + 1]) for col in range(n)]
+                         for row in range(4)]
+        for row in (0, 2):  # trace rows have no colorbar
+            for cax in colorbar_axes[row]:
+                cax.axis("off")
 
         for col, preview in enumerate(self.previews):
+            # EMG first: it is what separates wake from sleep, so it is the
+            # channel you look at first.
             for row, (channel, trace) in enumerate(
-                (("EEG", preview.eeg), ("EMG", preview.emg))
+                (("EMG", preview.emg), ("EEG", preview.eeg))
             ):
                 ax_trace = axes[row * 2][col]
                 ax_spec = axes[row * 2 + 1][col]
 
                 t_plot, y_plot = _decimate_envelope(preview.times, trace, max_points)
                 ax_trace.plot(t_plot, y_plot, lw=0.3, color="#333333")
-                ax_trace.set_xlim(preview.times[0], preview.times[-1])
+                # Same limits as the spectrogram below, so the two line up.
+                ax_trace.set_xlim(preview.start, preview.end)
                 ax_trace.set_ylabel(f"{channel}")
                 ax_trace.set_xticks([])
                 for spine in ax_trace.spines.values():
@@ -168,7 +185,11 @@ class SignalCheck:
                 if finite.size:
                     mesh.set_clim(*np.percentile(finite, [5, 99]))
                 ax_spec.set_ylabel(f"{channel} freq (Hz)")
-                fig.colorbar(mesh, ax=ax_spec, pad=0.01)
+                ax_spec.set_xlim(preview.start, preview.end)
+                fig.colorbar(mesh, cax=colorbar_axes[row * 2 + 1][col],
+                             orientation="vertical", label="power")
+                for spine in ax_spec.spines.values():
+                    spine.set_visible(False)
 
                 for mains in _MAINS_FREQUENCIES:
                     if mains <= top:

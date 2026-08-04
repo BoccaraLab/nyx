@@ -221,14 +221,25 @@ class Agreement:
     kappa: float
     confusion_matrix: np.ndarray
     per_stage: Any  # pandas DataFrame indexed by stage
-    overall: Any  # pandas Series
+    overall: Any  # pandas Series, macro (unweighted) averages
     label_order: list[str]
     details: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def mf1(self) -> float:
+        """Macro F1: the unweighted mean of the per-stage F1 scores.
+
+        The headline number. Unweighted on purpose -- weighting by how much of
+        the recording each stage occupies lets a dominant stage mask poor
+        performance on a rare one, and REM is always a small fraction.
+        """
+        return float(self.overall["f1-score"])
 
     def summary(self) -> str:
         lines = [
             "=== Agreement with reference scoring ===",
-            f"Accuracy: {self.accuracy:.3f}    Cohen's kappa: {self.kappa:.3f}",
+            f"MF1: {self.mf1:.3f}    Accuracy: {self.accuracy:.3f}    "
+            f"Cohen's kappa: {self.kappa:.3f}",
             "",
             self.per_stage.to_string(
                 formatters={
@@ -238,6 +249,11 @@ class Agreement:
                     "support": "{:.1f}s".format,
                 }
             ),
+            "",
+            "Macro average (unweighted, over stages present in the reference):",
+            f"  precision {self.overall['precision']:.3f}   "
+            f"recall {self.overall['recall']:.3f}   "
+            f"MF1 {self.mf1:.3f}",
             "",
             "Confusion matrix (rows=reference, cols=nyx, values in seconds):",
         ]
