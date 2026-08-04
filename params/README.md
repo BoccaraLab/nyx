@@ -52,7 +52,7 @@ differ in how many steps they need, not in the code that runs them.
 ```jsonc
 { "name": "split_sleep",
   "within": "SLEEP",            // which label to subdivide
-  "method": "hdbscan",          // hdbscan | kmeans | gmm | dbscan | elliptic | emg_threshold
+  "method": "hdbscan",          // hdbscan | kmeans | gmm | elliptic | emg_threshold
   "pcs_to_use": [0, 1, 2, 3],   // or "n_pcs": 4
   "use_emg": false,             // add EMG power as an extra feature
   "stage_order": ["REM", "NREM"] }   // names clusters by centroid, lowest first

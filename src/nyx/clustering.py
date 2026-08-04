@@ -16,12 +16,12 @@ def run_clustering_step(features_scaled: np.ndarray, scaler, clustering_params: 
         Used to inverse-transform centres (kept for API consistency; centres
         are returned in the scaled space so they can be used for sorting).
     clustering_params : dict
-        method                   : 'kmeans' | 'gmm' | 'hdbscan' | 'dbscan'
+        method                   : 'kmeans' | 'gmm' | 'hdbscan' | 'elliptic'
         n_clusters               : int  (used by kmeans / gmm)
         hdbscan_min_cluster_size : int
         hdbscan_min_samples      : int
-        dbscan_eps               : float
-        dbscan_min_samples       : int
+        elliptic_contamination   : float
+        elliptic_support_fraction: float
 
     Returns
     -------
@@ -31,7 +31,7 @@ def run_clustering_step(features_scaled: np.ndarray, scaler, clustering_params: 
                      indexed by cluster id (cluster_centers[cid])
     """
     import hdbscan as hdbscan_lib
-    from sklearn.cluster import DBSCAN, KMeans
+    from sklearn.cluster import KMeans
     from sklearn.metrics import pairwise_distances
     from sklearn.mixture import GaussianMixture
 
@@ -104,23 +104,9 @@ def run_clustering_step(features_scaled: np.ndarray, scaler, clustering_params: 
                             for c in unique_clusters])
         return _reindex(raw_labels, unique_clusters), raw_labels, centers
 
-    elif method == 'dbscan':
-        eps = float(clustering_params.get('dbscan_eps', 0.5))
-        min_s = int(clustering_params.get('dbscan_min_samples', 10))
-        model = DBSCAN(eps=eps, min_samples=min_s)
-        raw_labels = model.fit_predict(features_scaled).astype(int)
-        unique_clusters = np.unique(raw_labels[raw_labels >= 0])
-        if len(unique_clusters) == 0:
-            fallback = KMeans(n_clusters=n_clusters, random_state=0, n_init=10)
-            fb_labels = fallback.fit_predict(features_scaled).astype(int)
-            return fb_labels, raw_labels, fallback.cluster_centers_
-        centers = np.array([features_scaled[raw_labels == c].mean(axis=0) for c in unique_clusters])
-        labels = _reindex(_assign_noise_to_nearest(raw_labels, centers, unique_clusters), unique_clusters)
-        return labels, raw_labels, centers
-
     else:
         raise ValueError(f"Unknown clustering method: '{method}'. "
-                         f"Supported: 'kmeans', 'gmm', 'hdbscan', 'dbscan', 'elliptic'.")
+                         f"Supported: 'kmeans', 'gmm', 'hdbscan', 'elliptic'.")
 
 
 def reconstruct_signal_multiclass(stage_array: np.ndarray, wakesleep_hypno: dict,

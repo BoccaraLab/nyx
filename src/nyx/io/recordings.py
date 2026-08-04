@@ -1,8 +1,8 @@
 """Readers that turn a recording file into a :class:`~nyx.types.Recording`.
 
-Readers are keyed by *file format*, not by dataset, so that using nyx on new
-data needs no code -- only a format name and two channel selectors. Formats
-nyx does not know about can be added from user code::
+Readers are keyed by *file format* so that using nyx on new
+data needs no code -- only a format name and two channel selectors. 
+Formats nyx does not know about can be added from user code::
 
     from nyx.io import register_recording_reader
 
@@ -131,7 +131,7 @@ def _read_edf(path: str, eeg_channel: ChannelSpec, emg_channel: ChannelSpec, **k
     """Read an EDF/EDF+/BDF file.
 
     Tries spikeinterface first, then pyedflib, then MNE. The fallbacks exist
-    because a lot of real EDF+ files in the wild are not standard-compliant and
+    because a lot of real EDF+ files are not standard-compliant and
     the stricter readers refuse them.
 
     Some polysomnography files split signals across EDF *streams* sampled at
@@ -222,7 +222,7 @@ def _read_spikeinterface(
     """Read a folder previously saved with spikeinterface (``recording.save(...)``)."""
     import spikeinterface as si
 
-    rec = si.load_extractor(path)
+    rec = si.load(path)
     return _split_channels(rec, eeg_channel, emg_channel)
 
 

@@ -183,9 +183,7 @@ def _timestamps_to_seconds(values, time_format: str) -> np.ndarray:
     elif time_format == "datetime":
         parsed = pd.to_datetime(pd.Series(values))
         # Subtract before converting, so the result does not depend on whether
-        # pandas stored the timestamps as ns, us or ms. (The old loader did
-        # `.astype(int64) // 10**9`, which silently returns the wrong scale on
-        # any pandas that does not pick nanosecond resolution.)
+        # pandas stored the timestamps as ns, us or ms.
         if parsed.empty:
             return np.array([], dtype="float64")
         seconds = (parsed - parsed.iloc[0]).dt.total_seconds().to_numpy(dtype="float64")

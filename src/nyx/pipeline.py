@@ -82,15 +82,13 @@ __all__ = [
 # Defaults for :func:`cluster_sleep`. These are the values the published
 # analyses used; a `clustering` section in the params file overrides them.
 DEFAULT_CLUSTERING: dict[str, Any] = {
-    "method": "hdbscan",  # "hdbscan", "kmeans", "gmm" or "dbscan"
+    "method": "hdbscan",  # "hdbscan", "kmeans", "gmm" or "elliptic"
     "n_clusters": 2,  # used by kmeans and gmm only
     "pcs_to_use": [0, 1, 2, 3],
     "use_emg": False,  # add EMG power as an extra clustering feature
     "outlier_z_threshold": 6,  # epochs beyond this |z| are marked NOSIGNAL
     "hdbscan_min_cluster_size": 300,
     "hdbscan_min_samples": 30,
-    "dbscan_eps": 0.5,  # dbscan only
-    "dbscan_min_samples": 10,  # dbscan only
     "elliptic_contamination": 0.1,  # elliptic only
     "elliptic_support_fraction": 0.75,  # elliptic only
     # Renumber clusters by centroid so that ids are a property of the data, not
