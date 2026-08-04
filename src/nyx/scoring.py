@@ -120,48 +120,6 @@ def savehypno(epoch_data, savepath):
     df.to_csv(savepath, index=False)
 
 
-def apply_forbidden_transitions(hypnogram):
-    """
-    Corrects forbidden transitions in a hypnogram.
-    For example, a REM epoch surrounded by WAKE is converted to WAKE.
-    It also merges consecutive states with the same label.
-    """
-    hypno_df = pd.DataFrame(hypnogram)
-    if len(hypno_df) < 3:
-        return hypnogram
-
-    # Apply rule: WAKE -> REM -> WAKE becomes WAKE -> WAKE -> WAKE
-    for i in range(1, len(hypno_df) - 1):
-        prev_state = hypno_df.loc[i - 1, 'label']
-        current_state = hypno_df.loc[i, 'label']
-        next_state = hypno_df.loc[i + 1, 'label']
-
-        if prev_state == 'WAKE' and current_state == 'REM' and next_state == 'WAKE':
-            hypno_df.loc[i, 'label'] = 'WAKE'
-
-    # Merge consecutive states with the same label
-    merged_hypno = []
-    if len(hypno_df) > 0:
-        current_state = hypno_df.iloc[0].to_dict()
-        for i in range(1, len(hypno_df)):
-            next_state = hypno_df.iloc[i]
-            if next_state['label'] == current_state['label']:
-                current_state['duration'] += next_state['duration']
-            else:
-                merged_hypno.append(current_state)
-                current_state = next_state.to_dict()
-        merged_hypno.append(current_state)
-
-    if not merged_hypno:
-        return {'time': [], 'duration': [], 'label': []}
-
-    # Convert list of dicts back to dict of lists
-    return {
-        'time': [d['time'] for d in merged_hypno],
-        'duration': [d['duration'] for d in merged_hypno],
-        'label': [d['label'] for d in merged_hypno]
-    }
-    
 def save_hypno_with_padding(hypnogram, savepath, time_start, time_end, total_duration):
     """
     Saves a hypnogram with NOSIGNAL padding for the excluded periods.

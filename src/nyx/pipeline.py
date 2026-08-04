@@ -30,7 +30,7 @@ import os
 import pickle
 import warnings
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -40,8 +40,8 @@ from sklearn.preprocessing import StandardScaler
 from nyx.clustering import reconstruct_signal_multiclass, run_clustering_step
 from nyx.features import compute_eeg_pca_feature, compute_emg_power_trace
 from nyx.metrics import compare_sleep, trim_manual_scores
+from nyx.postprocess import apply_rules, rules_from_params
 from nyx.scoring import (
-    apply_forbidden_transitions,
     classify_wakesleep,
     prepare_epoch_data,
     save_hypno_with_padding,
@@ -445,7 +445,6 @@ def assign_stages(
     wake_sleep: WakeSleep,
     stage_order: Sequence[str] = ("REM", "NREM"),
     overrides: dict[int, str] | None = None,
-    forbidden_transitions: bool = False,
     within: str = "SLEEP",
 ) -> Staging:
     """Map clusters onto sleep stages and build the final hypnogram.
@@ -462,8 +461,10 @@ def assign_stages(
         default ``("REM", "NREM")`` reflects REM having less low-frequency power.
     overrides
         ``{cluster_id: stage}``, applied after the automatic assignment.
-    forbidden_transitions
-        Rewrite REM epochs that sit between two WAKE epochs as WAKE.
+
+    Rules that rewrite implausible *sequences* -- REM out of wake, segments too
+    short to be a real bout -- are not applied here. They belong to the params'
+    ``postprocess`` list; see :mod:`nyx.postprocess`.
     """
     ordered = sorted(
         clusters.unique_labels, key=lambda cid: clusters.centers[cid, 0]
@@ -510,9 +511,6 @@ def assign_stages(
         sleep_stages, wake_sleep.hypnogram, pca.fs, pca.signal.shape[0], within=within
     )
     hypnogram = prepare_epoch_data(stage_signal, pca.fs, state_names=_INT_TO_STAGE)
-
-    if forbidden_transitions:
-        hypnogram = apply_forbidden_transitions(hypnogram)
 
     return Staging(
         hypnogram=hypnogram,
@@ -597,7 +595,6 @@ def score_recording(
     nosignal_threshold: float = 0.0,
     stage_order: Sequence[str] = ("REM", "NREM"),
     cluster_overrides: dict[int, str] | None = None,
-    forbidden_transitions: bool = False,
     return_in_uV: bool = False,
     verbose: bool = True,
 ) -> ScoringResult:
@@ -658,8 +655,17 @@ def score_recording(
         wake_sleep,
         stage_order=stage_order,
         overrides=cluster_overrides,
-        forbidden_transitions=forbidden_transitions,
     )
+
+    rules = rules_from_params(params)
+    if rules:
+        if verbose:
+            print("  postprocessing:")
+        staging = replace(
+            staging,
+            hypnogram=apply_rules(staging.hypnogram, rules, verbose=verbose),
+        )
+
     if verbose:
         durations = staging.stage_durations()
         total = sum(durations.values()) or 1.0

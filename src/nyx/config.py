@@ -432,6 +432,21 @@ def validate_params(params: dict, source: str = "<params>") -> None:
                 f"settings, or wait for scalogram support."
             )
 
+    # Postprocessing rules: catch a typo here rather than after the scoring has
+    # run, which on a long recording is many minutes later.
+    from nyx.postprocess import RULES, _as_call
+
+    for i, rule in enumerate(params.get("postprocess") or []):
+        try:
+            name, _ = _as_call(rule)
+        except ValueError as exc:
+            raise ValueError(f"{source}: postprocess[{i}]: {exc}") from exc
+        if name not in RULES:
+            raise ValueError(
+                f"{source}: postprocess[{i}] names an unknown rule {name!r}. "
+                f"Available: {sorted(RULES)}."
+            )
+
     for i, step in enumerate(params.get("steps", [])):
         if "name" not in step:
             raise KeyError(f"{source}: steps[{i}] has no 'name'.")

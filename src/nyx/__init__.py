@@ -47,6 +47,7 @@ from nyx.pipeline import (
     save_results,
     score_recording,
 )
+from nyx.postprocess import apply_rules
 from nyx.preprocessing import preprocess_recording
 from nyx.report import plot_scoring_overview, plot_summary, save_report
 from nyx.steps import Refinement, Step, run_step, run_steps
@@ -90,6 +91,7 @@ __all__ = [
     "check_signals",
     "SignalCheck",
     "preprocess_recording",
+    "apply_rules",
     # pipeline steps
     "compute_emg_features",
     "find_wake_sleep_threshold",

@@ -202,6 +202,12 @@ thresholds — so it is shareable. See [`params/README.md`](params/README.md).
 Shipped defaults: `mouse.json`, `mouse_weak_emg.json` (when the EMG does not
 separate cleanly), `rat.json`, `human.json`.
 
+An optional `postprocess` list rewrites implausible *sequences* after the
+scoring — REM straight out of wake, segments too short to be a real bout. It is
+off by default: those rules barely move agreement but they do move the biology,
+so which one to use depends on what your analysis measures. See
+[`nyx/postprocess.py`](src/nyx/postprocess.py) and `params/README.md`.
+
 ## Reproducibility
 
 Every run writes a `run.json` holding the parameters **inline** plus every

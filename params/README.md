@@ -88,6 +88,37 @@ thresholding a component:
 ]
 ```
 
+### Postprocessing
+
+Clustering scores each epoch on its own, so it has no notion of what a
+plausible *sequence* looks like. An optional `postprocess` list adds that back,
+as an ordered list in the same shape as `preprocess`:
+
+```jsonc
+"postprocess": [
+  { "rem_after_wake": { "min_wake_duration": 0 } },
+  { "min_duration":   { "seconds": 4 } }
+]
+```
+
+| rule | effect |
+|---|---|
+| `rem_flanked_by_wake` | REM with WAKE on both sides becomes WAKE. `max_duration` limits it to short bouts. |
+| `rem_after_wake` | REM *following* a WAKE bout becomes WAKE. `min_wake_duration` limits it to REM after a long enough wake bout. |
+| `min_duration` | No segment shorter than `seconds` survives. 4 for rodents, 30 for human recordings. |
+
+**Off by default, and worth leaving off unless you know which readout you are
+protecting.** Global agreement barely moves — in the paper's comparison Cohen's
+kappa sat at ~0.83 for every rule, including no rule at all. What moves is the
+biology: `rem_after_wake` pulls the REM/NREM ratio towards the manual value and
+pushes total sleep time away from it, and `min_duration` cuts the microarousal
+count by about a sixth but overshoots. Whichever you choose, `run.json` records
+it — say in your methods which one you used.
+
+The five rules compared in the paper are `rem_after_wake` with
+`min_wake_duration` 20 (R3) or 0 (R4), `min_duration` at 4 s (R5), and the two
+orderings of R4 and R5 (R6, R7). Order matters and is the order you write.
+
 ### Comments
 
 JSON has no comments, so any key beginning with `_` is ignored. Use `_comment`
