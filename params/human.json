@@ -1,0 +1,83 @@
+{
+    "_comment": "Default parameters for human PSG, resolving five stages (WAKE, NREM1, NREM2, NREM3, REM). Differs from the rodent files in three ways: 30 s epochs as standard in human scoring; per-frequency z-scoring, so components are comparable across subjects; and three clustering steps rather than one, because a single night is short and the EMG alone does not separate wake reliably. Keys beginning with _ are comments and are ignored.",
+
+    "features": {
+        "method": "spectrogram"
+    },
+
+    "EEG": {
+        "_comment": "0.3-35 Hz spans delta through spindles and beta. 30 s epochs match AASM scoring.",
+        "min_freq": 0.3,
+        "max_freq": 35,
+        "binsize": 30,
+        "overlapratio": 0.5,
+        "time_smooth": 30,
+        "scaling": "density",
+        "detrend": "constant",
+        "mode": "psd",
+        "scale": "dB",
+        "normalized": "zscore",
+        "notch": null
+    },
+
+    "EMG": {
+        "_comment": "Set notch to 50 (Europe) or 60 (North America) if nyx.check_signals reports mains pickup; chin EMG picks it up readily.",
+        "min_freq": 10,
+        "max_freq": 100,
+        "binsize": 30,
+        "overlapratio": 0.5,
+        "time_smooth": 30,
+        "scaling": "density",
+        "detrend": "constant",
+        "mode": "psd",
+        "scale": "dB",
+        "normalized": "zscore",
+        "notch": null
+    },
+
+    "scoring": {
+        "pc_components": 6,
+        "min_duration": 4
+    },
+
+    "steps": [
+        {
+            "_comment": "No EMG threshold: a threshold above 1 puts every epoch into SLEEP, because EMG power is min-max scaled to [0, 1]. Wake is recovered by clustering in the next step instead. Raise nosignal_threshold to drop flat or disconnected stretches.",
+            "name": "no_emg_split",
+            "method": "emg_threshold",
+            "threshold": 1.5,
+            "nosignal_threshold": 0.0
+        },
+        {
+            "_comment": "Wake vs sleep by clustering the whole recording on 2 PCs plus EMG power. elliptic fits the dense sleep bulk and calls the scattered remainder wake, which suits a night that is mostly sleep.",
+            "name": "wake_sleep",
+            "within": "SLEEP",
+            "method": "elliptic",
+            "pcs_to_use": [0, 1],
+            "use_emg": true,
+            "elliptic_contamination": 0.1,
+            "elliptic_support_fraction": 0.75,
+            "stage_order": ["SLEEP", "WAKE"]
+        },
+        {
+            "_comment": "Optionally separate NREM1 out of what was called wake. Map both clusters to WAKE to skip this split for a recording where it does not look convincing.",
+            "name": "split_wake",
+            "within": "WAKE",
+            "method": "kmeans",
+            "n_clusters": 2,
+            "pcs_to_use": [0, 1, 2],
+            "use_emg": false,
+            "stage_order": ["WAKE", "NREM1"]
+        },
+        {
+            "_comment": "Split sleep into the deeper stages. Four clusters for three stages is deliberate: NREM2 is broad and usually needs two. Add a refinement here to divide a stage by a component, e.g. NREM1 out of NREM2.",
+            "name": "split_sleep",
+            "within": "SLEEP",
+            "method": "kmeans",
+            "n_clusters": 4,
+            "pcs_to_use": [0, 1, 2, 3],
+            "use_emg": false,
+            "stage_order": ["NREM3", "NREM2", "NREM2", "REM"]
+        }
+    ]
+}

@@ -1,0 +1,61 @@
+{
+    "_comment": "Default parameters for rat EEG/EMG. Very close to mouse.json; rat cortical rhythms are slower, so the clustering is a little less aggressive and fewer components are used. Keys beginning with _ are comments and are ignored.",
+
+    "features": {
+        "method": "spectrogram"
+    },
+
+    "EEG": {
+        "min_freq": 0.5,
+        "max_freq": 40,
+        "binsize": 2,
+        "overlapratio": 0.5,
+        "time_smooth": 4,
+        "scaling": "density",
+        "detrend": "constant",
+        "mode": "psd",
+        "scale": "dB",
+        "normalized": "mean",
+        "notch": null
+    },
+
+    "EMG": {
+        "min_freq": 30,
+        "max_freq": 100,
+        "binsize": 4,
+        "overlapratio": 0.5,
+        "time_smooth": 4,
+        "scaling": "density",
+        "detrend": "constant",
+        "mode": "psd",
+        "scale": "dB",
+        "normalized": "mean",
+        "notch": null
+    },
+
+    "scoring": {
+        "pc_components": 6,
+        "min_duration": 4
+    },
+
+    "steps": [
+        {
+            "name": "wake_sleep",
+            "method": "emg_threshold",
+            "threshold": null,
+            "nosignal_threshold": 0.0
+        },
+        {
+            "_comment": "Smaller minimum cluster size than mouse: rat REM bouts are a smaller fraction of the recording, and a large minimum can swallow them.",
+            "name": "split_sleep",
+            "within": "SLEEP",
+            "method": "hdbscan",
+            "pcs_to_use": [0, 1, 2],
+            "use_emg": false,
+            "outlier_z_threshold": 6,
+            "hdbscan_min_cluster_size": 150,
+            "hdbscan_min_samples": 10,
+            "stage_order": ["REM", "NREM"]
+        }
+    ]
+}
