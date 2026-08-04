@@ -1,6 +1,5 @@
 """Comparing a nyx hypnogram against a reference (manually scored) hypnogram."""
 
-import copy
 
 import numpy as np
 import pandas as pd
@@ -42,25 +41,6 @@ def expand_manual_labels(manual_labels, epoch_length, fs, label_map = None):
     expanded_labels = np.repeat(manual_labels, samples_per_epoch)
     return prepare_epoch_data(expanded_labels, fs, state_names = label_map if label_map else {})
 
-def merge_qw_to_wake(data):
-    """Accept dict or pandas.DataFrame. Return a new object with QW/QUIET_WAKE -> WAKE."""
-    def is_qw(x):
-        if pd.isna(x):
-            return False
-        return str(x).strip().upper() in ('QW', 'QUIET_WAKE')
-
-    d = copy.deepcopy(data)
-    if isinstance(d, dict):
-        if 'label' not in d:
-            raise KeyError("dict must contain 'label' key")
-        d['label'] = ['WAKE' if is_qw(x) else x for x in d['label']]
-        return d
-    elif isinstance(d, pd.DataFrame):
-        df = d.copy()
-        df['label'] = df['label'].apply(lambda x: 'WAKE' if is_qw(x) else x)
-        return df
-    else:
-        raise TypeError("data must be dict or pandas.DataFrame")
 
 def merge_states(data: dict, merge_map: dict) -> dict:
     """

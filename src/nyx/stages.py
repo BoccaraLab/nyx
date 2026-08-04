@@ -66,7 +66,7 @@ COLORS: dict[str, str] = {
     "QW": "#cfb474",
     "WAKE": "#F09E05",
     "REM": "#b1d6b0",
-    "NREM1": "#dac0da",
+    "NREM1": "#5a5db1",
     "NREM2": "#a38bc1",
     "NREM3": "#402864",
     "NREM": "#402864",

@@ -1,7 +1,7 @@
 """Collapsing a hypnogram to a coarser set of stages.
 
 Scoring runs once at the finest granularity it can reach; coarser hypnograms
-are then produced by merging labels, not by clustering again. So a human run
+are then produced by merging labels. So a human run
 that resolves five stages also yields the four- and three-stage versions for
 free, and they are guaranteed to be consistent with each other.
 

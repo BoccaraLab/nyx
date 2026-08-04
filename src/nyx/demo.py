@@ -112,8 +112,8 @@ def demo_recording(
     ----------
     mains_hz
         Add mains interference at this frequency, with harmonics, to both
-        channels. Use it to see :func:`nyx.check_signals` detect the hum and
-        :func:`nyx.apply_notch` remove it.
+        channels. Use it to see :func:`nyx.check_signals` detect the hum, and
+        a ``"notch"`` in the params remove it.
     artefact_seconds
         Add a stretch of saturated, high-amplitude signal to the start and the
         end, of the kind you get from handling the animal or a loose

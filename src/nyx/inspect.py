@@ -30,10 +30,39 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.signal import spectrogram as _scipy_spectrogram
 
-from nyx.preprocessing import apply_notch, line_noise_score
+from nyx.preprocessing import preprocess_channel
 from nyx.types import Recording
 
-__all__ = ["SignalCheck", "SignalPreview", "check_signals"]
+__all__ = ["SignalCheck", "SignalPreview", "check_signals", "line_noise_score"]
+
+
+def line_noise_score(
+    freqs: np.ndarray, spectrum: np.ndarray, freq: float, bandwidth: float = 2.0
+) -> float:
+    """How far the spectrum sticks up at ``freq`` above its local surroundings.
+
+    Returns the difference, in the spectrum's own units (dB, if the spectrogram
+    was computed in dB), between the peak inside ``freq +/- bandwidth`` and the
+    median of the flanking bands. Values above roughly 3 dB are worth a notch;
+    a clean recording sits near 0.
+
+    Returns ``nan`` if ``freq`` is outside the range covered by ``freqs``.
+
+    This assumes the spectrum is locally flat around ``freq``, so it is only
+    meaningful on an unfiltered signal. Measured inside a filter's transition
+    band -- after a low-pass below the mains frequency, say -- the flanks are
+    attenuated more than the centre and the score rises even though the
+    absolute power fell. Run it before filtering, not after.
+    """
+    freqs = np.asarray(freqs, dtype=float)
+    spectrum = np.asarray(spectrum, dtype=float)
+
+    peak = np.abs(freqs - freq) <= bandwidth
+    flank = (np.abs(freqs - freq) > bandwidth) & (np.abs(freqs - freq) <= 4 * bandwidth)
+    if not peak.any() or not flank.any():
+        return float("nan")
+
+    return float(spectrum[peak].max() - np.median(spectrum[flank]))
 
 # Mains frequencies worth testing for: 50 Hz almost everywhere, 60 Hz in North
 # America and Japan. Both are checked so the data tells you which applies.
@@ -202,7 +231,8 @@ class SignalCheck:
             + (f"  (notch {self.notch_applied:g} Hz applied)" if self.notch_applied else ""),
             fontweight="bold",
         )
-        fig.tight_layout()
+        # No tight_layout: the colorbar axes are placed by the GridSpec above,
+        # which tight_layout cannot account for. Spacing is set there instead.
         return fig
 
 
@@ -251,12 +281,17 @@ def check_signals(
     previews: list[SignalPreview] = []
     for name, start, end in windows:
         window = recording.time_slice(start, end)
-        eeg = window.eeg_trace(return_in_uV=return_in_uV)
-        emg = window.emg_trace(return_in_uV=return_in_uV)
 
         if notch:
-            eeg = apply_notch(eeg, fs, notch)
-            emg = apply_notch(emg, fs, notch)
+            # Preview what the notch would do, without altering the recording.
+            settings = {"notch": float(notch)}
+            eeg_rec = preprocess_channel(window.eeg, settings)
+            emg_rec = preprocess_channel(window.emg, settings)
+            eeg = eeg_rec.get_traces(return_in_uV=return_in_uV)[:, 0]
+            emg = emg_rec.get_traces(return_in_uV=return_in_uV)[:, 0]
+        else:
+            eeg = window.eeg_trace(return_in_uV=return_in_uV)
+            emg = window.emg_trace(return_in_uV=return_in_uV)
 
         previews.append(
             SignalPreview(
@@ -267,7 +302,7 @@ def check_signals(
                 eeg=eeg,
                 emg=emg,
                 eeg_spectrogram=_preview_spectrogram(eeg, fs, binsize, fmax),
-                emg_spectrogram=_preview_spectrogram(emg, fs, binsize, fmax),
+                emg_spectrogram=_preview_spectrogram(emg, window.emg_fs, binsize, fmax),
             )
         )
 

@@ -117,19 +117,21 @@ does it need a notch filter, and where should the analysis window start and end.
 Mains interference is measured rather than eyeballed —
 `check.suggested_notch()` returns `50`, `60` or `None`.
 
-## Three decisions are yours
+## Four decisions are yours
 
-nyx is not a black box, and three points in it are genuine judgement calls. Each
+nyx is not a black box, and four points in it are genuine judgement calls. Each
 has an automatic default and an explicit override:
 
 | decision | default | override |
 |---|---|---|
 | analysis window | whole recording | `window=(start, end)` |
 | EMG wake/sleep threshold | fitted automatically | `emg_threshold=...` |
+| clustering settings | `DEFAULT_CLUSTERING` | the `clustering` params section |
 | which cluster is which stage | ordered by spectral content | `cluster_overrides={...}` |
 
-Run one recording, look at the EMG histogram and the per-cluster PSDs, and
-adjust. The defaults are reasonable, not optimal.
+Expect to adjust the last two per recording — that is normal use, not a sign
+something has gone wrong. Run one recording, look at the EMG histogram and the
+per-cluster spectra, and tune. The defaults are reasonable, not optimal.
 
 ---
 

@@ -16,7 +16,8 @@
         "mode": "psd",
         "scale": "dB",
         "normalized": "mean",
-        "notch": null
+        "notch": null,
+        "resample": null
     },
 
     "EMG": {
@@ -30,7 +31,8 @@
         "mode": "psd",
         "scale": "dB",
         "normalized": "mean",
-        "notch": null
+        "notch": null,
+        "resample": null
     },
 
     "scoring": {

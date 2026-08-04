@@ -1,10 +1,7 @@
 """PCA of the EEG spectrogram, fitted on selected stages only."""
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.interpolate import CubicSpline
-from scipy.signal import find_peaks, peak_prominences
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import MinMaxScaler
 
@@ -90,64 +87,4 @@ def run_pca(powers, fs, wakesleep_hypno=None, label=None, n_components=4):
 
     return pca, pca_result, pca_signal
 
-def orient_pca_by_peak(freqs, components, band=[1, 20], components_to_use=[0,1], plot=False, save_path=None):
 
-    n_components = len(components_to_use)
-    signs = np.ones(n_components, dtype=int)
-    
-    if plot:
-        fig, ax = plt.subplots(n_components, 1, figsize=(8, 4*n_components))
-    
-    for i in range(n_components):
-        comp_idx = components_to_use[i]
-        spl = CubicSpline(freqs, components[comp_idx, :])
-        xnew = np.linspace(band[0], band[1], 100)
-        ynew = spl(xnew)
-        peaks, _ = find_peaks(ynew)
-        valleys, _ = find_peaks(-ynew)
-        peaks_prom = peak_prominences(ynew, peaks)[0]
-        valley_prom = peak_prominences(-ynew, valleys)[0]
-
-        if np.max(peaks_prom) < np.max(valley_prom):
-            signs[i] = -1
-            chosen_peak = valleys[np.argmax(valley_prom)]
-        else:
-            signs[i] = 1
-            chosen_peak = peaks[np.argmax(peaks_prom)]
-
-        if plot:
-            ax[i].plot(freqs, components[comp_idx, :], '.k', label="data")
-            ax[i].plot(xnew, ynew, '-b', label="spline")
-            ax[i].scatter(xnew[peaks], ynew[peaks], color='g')
-            ax[i].scatter(xnew[valleys], ynew[valleys], color='r')
-            ax[i].scatter(xnew[chosen_peak], ynew[chosen_peak], color='m', s=100, label="chosen peak")
-            ax[i].set_title(f'PC{comp_idx+1}')
-            ax[i].legend() 
-            plt.savefig(save_path) if save_path is not None else None
-           
-    return signs
-
-def reconstruct_signal_from_pca(pca: PCA, pca_result: np.ndarray, components_to_use: list = None) -> np.ndarray:
-    """
-    Reconstruct the signal from specific PCA components.
-
-    Parameters:
-    - pca: The fitted PCA object from scikit-learn.
-    - pca_result: The result of the PCA transformation (scores).
-    - components_to_use: A list of indices of the components to use for reconstruction.
-                         If None, all components are used.
-
-    Returns:
-    - The reconstructed signal (powers).
-    """
-    if components_to_use is not None:
-        # Create a copy of the PCA results and zero out the components we don't want to use
-        temp_pca_result = np.zeros_like(pca_result)
-        temp_pca_result[:, components_to_use] = pca_result[:, components_to_use]
-        reconstructed_data = pca.inverse_transform(temp_pca_result)
-    else:
-        # Use all components for reconstruction
-        reconstructed_data = pca.inverse_transform(pca_result)
-
-    # The data was transposed before PCA, so we transpose it back
-    return reconstructed_data.T

@@ -5,7 +5,7 @@ from collections.abc import Iterable
 import numpy as np
 import pandas as pd
 
-from nyx.stages import NOSIGNAL, NREM, REM, SLEEP, STATE_NAMES, UNCLASSIFIED, WAKE
+from nyx.stages import NOSIGNAL, SLEEP, STATE_NAMES, UNCLASSIFIED, WAKE
 
 # Kept as a module-level name because several functions below take it as a
 # default argument.
@@ -65,68 +65,6 @@ def classify_wakesleep(power_emg_h: np.ndarray, thresholds: Iterable[float], fs:
     return prepare_epoch_data(classifications, fs)
 
 
-def classify_sleep(feature_trace: np.ndarray, thresholds: Iterable[float] | float, wakesleep_hypno: dict[str, np.ndarray], fs: float, min_duration: float = 5) -> dict[str, np.ndarray]:
-    """Within SLEEP segments, split into REM/NREM by a threshold on a feature trace (e.g., PC1)."""
-    thr = float(np.atleast_1d(thresholds)[0])
-    wake_sleep_df = pd.DataFrame(wakesleep_hypno)
-    min_duration_samples = int(min_duration * fs)
-
-    epoch_times, epoch_durations, epoch_labels = [], [], []
-
-    for _, row in wake_sleep_df.iterrows():
-        start_time, duration, label = row["time"], row["duration"], row["label"]
-        end_time = start_time + duration
-
-        start_idx = int(np.floor(start_time * fs))
-        end_idx = int(np.floor(end_time * fs))
-
-        if label == "SLEEP":
-            # Skip if the segment has zero length in samples
-            if start_idx >= end_idx:
-                continue
-
-            segment_feature = feature_trace[start_idx:end_idx]
-            segment_time = np.arange(start_idx, end_idx) / fs
-
-            rem_indices = segment_feature < thr
-            nrem_indices = ~rem_indices
-
-            seg_cls = np.full_like(segment_feature, UNCLASSIFIED, dtype=int)
-            seg_cls[rem_indices] = REM
-            seg_cls[nrem_indices] = NREM
-
-            # Reclassify short REM -> NREM and NREM -> REM
-            _reclassify_short_segments(seg_cls, rem_indices, NREM, min_duration_samples)
-            _reclassify_short_segments(seg_cls, seg_cls == NREM, REM, min_duration_samples)
-
-            # Collapse back to epochs
-            current_label = seg_cls[0]
-            current_start_time = float(segment_time[0])
-            for i in range(1, len(seg_cls)):
-                if seg_cls[i] != current_label:
-                    current_duration = float(segment_time[i] - current_start_time)
-                    epoch_times.append(current_start_time)
-                    epoch_durations.append(current_duration)
-                    epoch_labels.append(state_names[current_label])
-                    current_start_time = float(segment_time[i])
-                    current_label = int(seg_cls[i])
-            final_duration = float(segment_time[-1] - current_start_time + (1 / fs))
-            epoch_times.append(current_start_time)
-            epoch_durations.append(final_duration)
-            epoch_labels.append(state_names[current_label])
-        else:
-            epoch_times.append(start_time)
-            epoch_durations.append(duration)
-            epoch_labels.append(str(label))
-
-    return {
-        "time": np.array(epoch_times, dtype="float64"),
-        "duration": np.array(epoch_durations, dtype="float64"),
-        "label": np.array(epoch_labels, dtype="U"),
-    }
-
-
-# Utility for preparing epoch data
 def prepare_epoch_data(classifications: np.ndarray, fs: float, state_names: dict[int, str] = state_names) -> dict[str, np.ndarray]:
     """Convert classification data into an epoch format."""
     if classifications.size == 0:

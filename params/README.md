@@ -40,8 +40,21 @@ per-recording attention will usually beat that.
 
 `binsize` is the epoch length in seconds. `normalized` is one of `false`,
 `"mean"`, `"zscore"` (per frequency bin across time — what makes components
-comparable across subjects) or `"relative"`. `notch` is `null`, `50` or `60`;
-run `nyx.check_signals()` and it will tell you which, if any, you need.
+comparable across subjects) or `"relative"`.
+
+### Preprocessing
+
+Two optional settings per channel, applied through spikeinterface before
+anything else — lazily, and once, so the signal check and the scoring see the
+same signal:
+
+| setting | effect |
+|---|---|
+| `notch` | mains frequency to remove: `50` (Europe) or `60` (Americas), plus harmonics. `null` disables it. Run `nyx.check_signals()` and it will tell you which, if any, you need. |
+| `resample` | target rate in Hz. Lowering it speeds everything up; keep it above twice your highest frequency of interest. `null` leaves the rate alone. |
+
+Both are per channel, because notching the EMG but not the EEG is a normal
+thing to want.
 
 ### Steps
 

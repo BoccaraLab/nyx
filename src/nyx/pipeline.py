@@ -1,7 +1,6 @@
 """The scoring pipeline, one function per step.
 
-This is the code that used to live inline in ``run_pipeline_new.ipynb``. Each
-step takes the previous step's result and returns a new one, so a caller can
+Each step takes the previous step's result and returns a new one, so a caller can
 stop after any step, show it to a user, change something, and re-run only what
 comes after. The notebook, a batch script and a GUI all drive the same
 functions.
@@ -19,15 +18,9 @@ The steps, in order::
 :func:`score_recording` runs all of them with automatic choices at each
 decision point.
 
-Three points in this pipeline are genuine judgement calls, not settled by the
-data: the analysis window, the EMG wake/sleep threshold, and which cluster is
-REM. Each has an automatic default and an explicit override.
-
-Output filenames changed in the refactor::
-
-    hdb_hypno_flexible.csv     ->  hypnogram.csv
-    wakesleep_hypno.csv        ->  wake_sleep.csv
-    agreement_metrics_auto.*   ->  agreement.*
+Three points in this pipeline are genuine judgement calls: 
+the analysis window, the EMG wake/sleep threshold, and clustering parameters. 
+Each has an automatic default and an explicit override.
 """
 
 from __future__ import annotations
@@ -102,26 +95,6 @@ _STAGE_TO_INT = {"NOSIGNAL": -2, "WAKE": -1, "NREM": 0, "REM": 1}
 _INT_TO_STAGE = {value: key for key, value in _STAGE_TO_INT.items()}
 
 
-def _conditioned_trace(trace: np.ndarray, fs: float, channel_params: dict) -> np.ndarray:
-    """Apply optional notch filtering, as set by ``"notch"`` in the channel params.
-
-    Decide whether you need this by running :func:`nyx.check_signals` first --
-    it measures mains pickup and tells you which frequency, if any, to set.
-    """
-    notch = channel_params.get("notch")
-    if not notch:
-        return trace
-    from nyx.preprocessing import apply_notch
-
-    return apply_notch(
-        trace,
-        fs,
-        float(notch),
-        harmonics=bool(channel_params.get("notch_harmonics", True)),
-        quality=float(channel_params.get("notch_quality", 30.0)),
-    )
-
-
 @dataclass
 class ScoringResult:
     """Everything :func:`score_recording` produced, in one object."""
@@ -168,9 +141,7 @@ def compute_emg_features(
     """
     # The EMG may be sampled differently from the EEG, as it is in several
     # polysomnography formats, so use its own rate rather than the recording's.
-    trace = _conditioned_trace(
-        recording.emg_trace(return_in_uV=return_in_uV), recording.emg_fs, params["EMG"]
-    )
+    trace = recording.emg_trace(return_in_uV=return_in_uV)
     spectrogram, freqs, times, power, fs = compute_emg_power_trace(
         trace, recording.emg_fs, params["EMG"]
     )
@@ -268,9 +239,7 @@ def compute_sleep_pca(
     components. ``within`` is what lets a later step refit inside WAKE or inside
     a specific NREM stage; see :mod:`nyx.steps`.
     """
-    trace = _conditioned_trace(
-        recording.eeg_trace(return_in_uV=return_in_uV), recording.fs, params["EEG"]
-    )
+    trace = recording.eeg_trace(return_in_uV=return_in_uV)
     spectrogram, freqs, times, pca, scores, signal, fs = compute_eeg_pca_feature(
         trace, recording.fs, params, wake_sleep.hypnogram, within=within
     )
@@ -652,6 +621,10 @@ def score_recording(
     emg_threshold
         Override the automatic wake/sleep threshold.
     """
+    from nyx.preprocessing import preprocess_recording
+
+    recording = preprocess_recording(recording, params)
+
     total_duration = recording.duration
     start, end = (0.0, total_duration) if window is None else window
     end = min(float(end), total_duration)
