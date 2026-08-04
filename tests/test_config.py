@@ -35,21 +35,31 @@ def test_params_need_eeg_and_emg(tmp_path):
         load_params(str(path))
 
 
-def test_scalogram_backend_is_reported_as_not_implemented():
+def test_scalogram_params_need_a_frequency_resolution():
+    """The two backends take different settings and are not interchangeable."""
     params = {**MINIMAL_PARAMS, "features": {"method": "scalogram"}}
-    with pytest.raises(NotImplementedError, match="scalogram"):
+
+    with pytest.raises(KeyError, match="freq_resolution"):
         validate_params(params)
 
 
-def test_legacy_scalogram_params_are_caught_before_they_fail_obscurely():
-    """anphy_human.json carries scalogram settings and no binsize; without this
-    it would fail deep in the feature code on a missing key."""
+def test_scalogram_params_declaring_the_spectrogram_are_caught_early():
+    """Without this it fails deep in the feature code on a missing key, minutes
+    into a long recording -- and the message points at the wrong thing."""
     params = {
         "EEG": {"freq_resolution": 1, "f0": 1, "exp_corr": 0},
         "EMG": {"binsize": 4},
     }
-    with pytest.raises(NotImplementedError, match="binsize"):
+    with pytest.raises(KeyError, match="scalogram"):
         validate_params(params)
+
+
+def test_a_valid_scalogram_params_file_passes():
+    validate_params({
+        "features": {"method": "scalogram"},
+        "EEG": {"min_freq": 0.5, "max_freq": 30, "freq_resolution": 0.5},
+        "EMG": {"min_freq": 30, "max_freq": 60, "freq_resolution": 1},
+    })
 
 
 def test_unknown_feature_method_is_rejected():

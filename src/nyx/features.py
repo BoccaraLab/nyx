@@ -1,4 +1,25 @@
-"""Spectral features: EMG band power and PCA of the EEG spectrogram."""
+"""Spectral features: EMG band power and PCA of the EEG time-frequency map.
+
+Two backends produce that map, chosen by ``features.method`` in the params and
+used for both channels:
+
+``"spectrogram"`` (the default)
+    Short-time Fourier transform, in fixed windows of ``binsize`` seconds. Time
+    resolution is the same at every frequency and is set by the window, so a
+    2 s window resolves 0.5 Hz but cannot see anything shorter than 2 s.
+
+``"scalogram"``
+    Continuous Morlet wavelet transform, at ``freq_resolution`` steps. The
+    window scales with frequency, so fast events keep their timing while slow
+    oscillations still get enough cycles to be measured. Costs more memory and
+    time, and gives one column per *sample* rather than per epoch -- which is
+    why the cluster plots decimate.
+
+The two take different settings and are not interchangeable in a params file:
+the spectrogram wants ``binsize`` and ``overlapratio``, the scalogram wants
+``freq_resolution`` (and optionally ``f0``, ``exp_corr``). ``validate_params``
+checks that before anything runs.
+"""
 
 
 import numpy as np
@@ -210,6 +231,76 @@ def _compute_spectrogram_ephyviewer(data: np.ndarray, fs: float, params: dict) -
     return Sxx, freqs, times
 
 
+def _compute_scalogram_as_spectrogram(
+    data: np.ndarray, fs: float, params: dict
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Wavelet scalogram, returned in the same ``(Sxx, freqs, times)`` shape as
+    :func:`_compute_spectrogram_ephyviewer` so the rest of the pipeline cannot
+    tell the two apart.
+
+    Needs ``min_freq``, ``max_freq`` and ``freq_resolution``. ``f0``,
+    ``exp_corr`` and ``time_smooth`` are optional; ``time_smooth`` is in
+    seconds and is applied inside the transform, so unlike the spectrogram
+    path there is no second smoothing pass.
+    """
+    for key in ("min_freq", "max_freq", "freq_resolution"):
+        if key not in params:
+            raise KeyError(
+                f"The scalogram backend needs {key!r}. Present: "
+                f"{sorted(k for k in params if not k.startswith('_'))}. "
+                f"(Did you mean features.method = 'spectrogram'? That one uses "
+                f"'binsize' and 'overlapratio' instead.)"
+            )
+
+    min_freq = float(params["min_freq"])
+    max_freq = float(params["max_freq"])
+    freq_resolution = float(params["freq_resolution"])
+    f0 = params.get("f0", 1)
+    exp_corr = params.get("exp_corr", 0)
+    time_smooth = params.get("time_smooth", 0.5)
+    wanted_size = len(data) / fs
+
+    # Mirror the sub-sampling _compute_scalogram_ephyviewer does internally, so
+    # the times vector matches the columns it returns.
+    len_wavelet = int(2 ** np.ceil(np.log(wanted_size * fs) / np.log(2)))
+    downsample_ratio = int(np.ceil(wanted_size * fs / len_wavelet))
+    sub_sample_rate = fs / max(downsample_ratio, 1)
+
+    Sxx = _compute_scalogram_ephyviewer(
+        data, min_freq, max_freq, freq_resolution, fs,
+        f0, exp_corr, time_smooth, wanted_size,
+    )
+
+    Sxx = normalize_spectrogram(Sxx, params.get("normalized", False))
+
+    freqs = np.arange(min_freq, max_freq, freq_resolution)
+    times = np.arange(Sxx.shape[1]) / sub_sample_rate
+    return Sxx, freqs, times
+
+
+def compute_time_frequency(
+    data: np.ndarray, fs: float, settings: dict, method: str = "spectrogram"
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Time-frequency map of one channel, as ``(Sxx, freqs, times)``.
+
+    ``method`` is ``"spectrogram"`` or ``"scalogram"``; see the module
+    docstring. Everything downstream works on the returned arrays alone, so a
+    new backend only has to produce that triple.
+    """
+    if method == "scalogram":
+        return _compute_scalogram_as_spectrogram(data, fs, settings)
+    if method == "spectrogram":
+        return _compute_spectrogram_ephyviewer(data, fs, settings)
+    raise ValueError(
+        f"Unknown feature method {method!r}. Expected 'spectrogram' or 'scalogram'."
+    )
+
+
+def feature_method(params: dict) -> str:
+    """The ``features.method`` setting, defaulting to the spectrogram."""
+    return str(params.get("features", {}).get("method", "spectrogram"))
+
+
 def normalize_scalogram(scalogram: np.ndarray) -> np.ndarray:
     """Normalize the scalogram by subtracting its mean power."""
     mean_power = np.mean(scalogram)
@@ -258,18 +349,21 @@ def band_power(freqs, power_smooth, f_band):
     return np.sum(power_smooth[idx_band, :], axis=0)
 
 
-def compute_emg_power_trace(emg: np.ndarray, fs_signal: float, emg_params: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
+def compute_emg_power_trace(
+    emg: np.ndarray,
+    fs_signal: float,
+    emg_params: dict,
+    method: str = "spectrogram",
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
     """
-    Compute EMG spectrogram and collapse to a band-power 1D trace with its own 'fs'.
-    Returns (power_trace, fs_trace).
+    Compute the EMG time-frequency map and collapse it to a band-power 1D trace
+    with its own 'fs'. Returns (Sxx, freqs, times, power_trace, fs_trace).
     """
-    Sxx, freqs, times = _compute_spectrogram_ephyviewer(
-        data=emg,
-        fs=fs_signal,
-        params=emg_params,
+    Sxx, freqs, times = compute_time_frequency(
+        emg, fs_signal, emg_params, method=method
     )
     if Sxx is None or times is None or len(times) < 2:
-        raise RuntimeError("EMG spectrogram failed or too short.")
+        raise RuntimeError(f"EMG {method} failed or too short.")
 
     # Sum across the EMG band of interest (here: using [min_freq, max_freq] from params)
     f_band = (float(emg_params["min_freq"]), float(emg_params["max_freq"]))
@@ -310,13 +404,12 @@ def compute_eeg_pca_feature(eeg: np.ndarray, fs_signal: float, params: dict, wak
     refits inside WAKE or inside SLEEP so its components describe only the
     structure that is left to resolve.
     """
-    Sxx, freqs, times = _compute_spectrogram_ephyviewer(
-        data=eeg,
-        fs=fs_signal,
-        params=params["EEG"]
+    method = feature_method(params)
+    Sxx, freqs, times = compute_time_frequency(
+        eeg, fs_signal, params["EEG"], method=method
     )
     if Sxx is None or times is None or len(times) < 2:
-        raise RuntimeError("EEG spectrogram failed or too short.")
+        raise RuntimeError(f"EEG {method} failed or too short.")
 
     dt = float(times[1] - times[0])
     fs_bins = 1.0 / dt if dt > 0 else 1.0

@@ -16,6 +16,7 @@ it means the same thing on their data.
 | `mouse_weak_emg.json` | mouse, when the EMG does not separate wake cleanly, or the recording is short — one clustering step recovers all three stages using EMG as a feature |
 | `rat.json` | rat EEG/EMG |
 | `human.json` | human PSG, five stages, three clustering steps |
+| `mouse_scalogram.json` | `mouse.json` with the wavelet backend — see below |
 
 These are **starting points, not fixed recipes.** Run one recording, look at the
 EMG threshold histogram and the per-cluster PSDs, and adjust. The defaults were
@@ -41,6 +42,45 @@ per-recording attention will usually beat that.
 `binsize` is the epoch length in seconds. `normalized` is one of `false`,
 `"mean"`, `"zscore"` (per frequency bin across time — what makes components
 comparable across subjects) or `"relative"`.
+
+### Spectrogram or scalogram
+
+`features.method` picks how the time-frequency map is built, for both channels:
+
+| | `"spectrogram"` (default) | `"scalogram"` |
+|---|---|---|
+| transform | short-time Fourier | continuous Morlet wavelet |
+| window | fixed, `binsize` seconds | scales with frequency |
+| settings | `binsize`, `overlapratio`, `scaling`, `detrend`, `mode`, `scale` | `freq_resolution`, `f0`, `exp_corr` |
+| output | one column per epoch | one column per **sample** |
+
+The scalogram keeps timing that a fixed window smears — brief REM bouts,
+transitions — at a large cost in memory and time. On one hour of mouse EEG it
+took **60 s against 0.7 s**, and produced 1.8 million bins rather than 3,599.
+Score a window rather than a whole night, or resample first.
+
+Its settings are not a superset of the spectrogram's, so the two are not
+interchangeable in a file; `load_params` checks the sections against the method
+you declared and says which key is missing rather than failing minutes into a
+run.
+
+**One thing does not carry over: the clustering settings.** `hdbscan`'s
+`hdbscan_min_cluster_size` counts *points*, and the scalogram gives one per
+sample instead of one per epoch — hundreds of times more. At `mouse.json`'s 300
+it split that same hour into 99 clusters. `mouse_scalogram.json` therefore uses
+`gmm` with a fixed `n_clusters`, which has no such failure mode; with `hdbscan`,
+raise `hdbscan_min_cluster_size` in proportion to the bin rate. Any cluster
+`stage_order` does not name is left unscored, with a warning saying so.
+
+Everything else after the transform is identical: the same PCA, the same
+clustering code, the same steps. Only the cluster scatter plots differ, and only
+in that they draw a fixed random subsample — `plot_clusters(result,
+max_points=...)` — since millions of points show nothing. The clustering itself
+always uses every point.
+
+The scalogram is not automatically better. On that hour it scored MF1 0.850
+against the spectrogram's 0.959, over-calling REM. Treat it as an option to try
+when you have a reason to, not an upgrade.
 
 ### Preprocessing
 

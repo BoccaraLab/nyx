@@ -45,10 +45,12 @@ __all__ = [
 #: Sections a params file must have.
 REQUIRED_PARAM_SECTIONS = ("EEG", "EMG")
 
-#: Feature backends. Only the spectrogram is implemented; the scalogram keys are
-#: recognised so that a params file using it fails with a clear message rather
-#: than a missing-key error deep inside the feature code.
+#: Feature backends, and the setting each one cannot run without. They take
+#: different settings and are not interchangeable, so a section is checked
+#: against the method it declares -- otherwise a mismatched params file fails
+#: with a missing-key error deep inside the feature code, minutes in.
 FEATURE_METHODS = ("spectrogram", "scalogram")
+_REQUIRED_KEYS = {"spectrogram": {"binsize"}, "scalogram": {"freq_resolution"}}
 _SCALOGRAM_KEYS = {"freq_resolution", "f0", "exp_corr"}
 
 
@@ -415,21 +417,22 @@ def validate_params(params: dict, source: str = "<params>") -> None:
             f"{source}: unknown features.method {method!r}. Expected one of "
             f"{list(FEATURE_METHODS)}."
         )
-    if method == "scalogram":
-        raise NotImplementedError(
-            f"{source} asks for the scalogram backend, which is not implemented yet. "
-            f"Use features.method = 'spectrogram'."
-        )
-
-    # Catch a scalogram params file that predates the explicit `features` key.
+    # Each backend needs settings the other does not have, so check the sections
+    # against the declared method before anything runs.
     for section in ("EEG", "EMG"):
         keys = {k for k in params.get(section, {}) if not k.startswith("_")}
-        if _SCALOGRAM_KEYS & keys and "binsize" not in keys:
-            raise NotImplementedError(
-                f"{source}: the {section} section has scalogram settings "
-                f"({sorted(_SCALOGRAM_KEYS & keys)}) but no 'binsize'. The scalogram "
-                f"backend is not implemented yet -- convert this file to spectrogram "
-                f"settings, or wait for scalogram support."
+        missing_keys = _REQUIRED_KEYS[method] - keys
+        if missing_keys:
+            hint = ""
+            if method == "spectrogram" and _SCALOGRAM_KEYS & keys:
+                # A file written for the scalogram before `features` existed.
+                hint = (
+                    f" It does carry scalogram settings ({sorted(_SCALOGRAM_KEYS & keys)}), "
+                    f"so this file probably wants features.method = 'scalogram'."
+                )
+            raise KeyError(
+                f"{source}: the {section} section is missing {sorted(missing_keys)}, "
+                f"which the {method} backend needs.{hint}"
             )
 
     # Postprocessing rules: catch a typo here rather than after the scoring has

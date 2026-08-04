@@ -38,7 +38,11 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 from nyx.clustering import reconstruct_signal_multiclass, run_clustering_step
-from nyx.features import compute_eeg_pca_feature, compute_emg_power_trace
+from nyx.features import (
+    compute_eeg_pca_feature,
+    compute_emg_power_trace,
+    feature_method,
+)
 from nyx.metrics import compare_sleep, trim_manual_scores
 from nyx.postprocess import apply_rules, rules_from_params
 from nyx.scoring import (
@@ -143,7 +147,7 @@ def compute_emg_features(
     # polysomnography formats, so use its own rate rather than the recording's.
     trace = recording.emg_trace(return_in_uV=return_in_uV)
     spectrogram, freqs, times, power, fs = compute_emg_power_trace(
-        trace, recording.emg_fs, params["EMG"]
+        trace, recording.emg_fs, params["EMG"], method=feature_method(params)
     )
     return EmgFeatures(
         spectrogram=spectrogram, freqs=freqs, times=times, power=power, fs=fs
@@ -497,11 +501,30 @@ def assign_stages(
     stage_labels[clusters.valid_mask] = names_valid
 
     # Integer codes as well, for the single-step path that reconstructs a
-    # WAKE/NREM/REM signal over the whole recording.
+    # WAKE/NREM/REM signal over the whole recording. Clusters whose stage is not
+    # in that vocabulary -- unnamed extras, or a step producing NREM2/NREM3 --
+    # are left unscored here; `stage_labels` above keeps their real names, which
+    # is what multi-step scoring builds on.
     stages_valid = np.full(len(clusters.features_scaled), _STAGE_TO_INT["NOSIGNAL"], dtype=int)
+    unnamed = []
     for cluster_id, stage in cluster_to_stage.items():
-        stages_valid[clusters.labels == cluster_id] = _STAGE_TO_INT.get(
-            stage, _STAGE_TO_INT["NREM"]
+        if stage not in _STAGE_TO_INT:
+            unnamed.append((cluster_id, int((clusters.labels == cluster_id).sum())))
+            continue
+        stages_valid[clusters.labels == cluster_id] = _STAGE_TO_INT[stage]
+
+    if unnamed:
+        unscored = sum(count for _, count in unnamed)
+        share = 100 * unscored / max(len(clusters.features_scaled), 1)
+        warnings.warn(
+            f"{len(unnamed)} of {len(cluster_to_stage)} clusters have no stage name, "
+            f"covering {share:.1f}% of the epochs, which are left unscored. "
+            f"stage_order names {len(stage_order)} cluster(s) ({list(stage_order)}) but "
+            f"the clustering produced {len(cluster_to_stage)}. Either name them all "
+            f"(stage_order or cluster_overrides), or change the clustering settings so "
+            f"it produces as many clusters as you have names -- with hdbscan that "
+            f"usually means raising hdbscan_min_cluster_size.",
+            stacklevel=2,
         )
 
     sleep_stages = np.full(len(clusters.valid_mask), _STAGE_TO_INT["NOSIGNAL"], dtype=int)

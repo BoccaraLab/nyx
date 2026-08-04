@@ -140,21 +140,43 @@ def plot_pca_components(result, ax=None, n: int = 4):
     return _despine(ax)
 
 
-def plot_clusters(result, ax=None):
-    """Sleep epochs in the space the clustering actually used."""
+def _subsample(n: int, max_points: int) -> np.ndarray:
+    """Indices of at most ``max_points`` rows, in order and reproducibly."""
+    if max_points is None or n <= max_points:
+        return np.arange(n)
+    keep = np.random.default_rng(0).choice(n, max_points, replace=False)
+    keep.sort()
+    return keep
+
+
+def plot_clusters(result, ax=None, max_points: int = 20_000):
+    """Sleep epochs in the space the clustering actually used.
+
+    ``max_points`` caps how many epochs are drawn per panel. The scalogram
+    backend produces one column per sample rather than per epoch, which is
+    millions of points -- more than a scatter plot can show anything with, and
+    enough to make the figure unopenable. The subsample is a fixed random draw,
+    so the picture is the same every time; the clustering itself always used
+    every point.
+    """
     ax = ax or plt.subplots(figsize=(6, 5))[1]
     clusters = result.clusters
     stages = result.staging.cluster_to_stage
 
+    keep = _subsample(len(clusters.features_scaled), max_points)
+    points = clusters.features_scaled[keep]
+    labels = clusters.labels[keep]
+    outliers = clusters.outlier_mask[keep]
+
     for i, cid in enumerate(clusters.unique_labels):
-        mask = clusters.labels == cid
-        ax.scatter(clusters.features_scaled[mask, 0], clusters.features_scaled[mask, 1],
-                   s=5, alpha=0.45, color=_cluster_colour(i),
+        mask = labels == cid
+        ax.scatter(points[mask, 0], points[mask, 1],
+                   s=5, alpha=0.45, color=_cluster_colour(i), rasterized=True,
                    label=f"C{cid} -> {stages.get(int(cid), '?')}")
-    if clusters.outlier_mask.any():
-        ax.scatter(clusters.features_scaled[clusters.outlier_mask, 0],
-                   clusters.features_scaled[clusters.outlier_mask, 1],
-                   s=5, alpha=0.3, color="0.6", label="outlier -> NOSIGNAL")
+    if outliers.any():
+        ax.scatter(points[outliers, 0], points[outliers, 1],
+                   s=5, alpha=0.3, color="0.6", rasterized=True,
+                   label="outlier -> NOSIGNAL")
 
     for i, centre in enumerate(clusters.centers):
         ax.scatter(centre[0], centre[1], marker="x", s=110, c="k", lw=2, zorder=5)
