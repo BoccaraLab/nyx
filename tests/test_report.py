@@ -338,3 +338,77 @@ def test_both_hypnograms_share_their_rows(synthetic_recording, params):
     }
     assert "awake" not in rows and "non-REM" not in rows
     assert {"WAKE", "NREM", "REM"} <= rows
+
+
+# ---------------------------------------------------------------------------
+# The ordering stage_order maps onto
+# ---------------------------------------------------------------------------
+
+
+def test_ordering_table_is_in_naming_order(pieces):
+    """`stage_order` names clusters by position in this table, so the table has
+    to be in that order and say which position each cluster holds."""
+    from nyx.pipeline import cluster_order
+
+    clusters = pieces[3]
+    table = nyx.cluster_ordering(clusters)
+
+    assert list(table.index) == list(range(len(clusters.unique_labels)))
+    assert list(table["cluster"]) == cluster_order(clusters)
+
+
+def test_ordering_table_carries_the_centroids(pieces):
+    """The point of it: two centroids a hundredth apart look identical in the
+    scatter plot, and the order between them decides two stage names."""
+    clusters = pieces[3]
+    table = nyx.cluster_ordering(clusters)
+
+    assert "PC1" in table.columns
+    assert table["epochs"].sum() > 0
+    for position, cid in enumerate(table["cluster"]):
+        assert table.loc[position, "PC1"] == pytest.approx(
+            clusters.centers[cid, 0], abs=1e-4
+        )
+    # PC1 non-decreasing, since that is what the order is by.
+    assert list(table["PC1"]) == sorted(table["PC1"])
+
+
+def test_ordering_table_shows_stages_when_they_are_known(pieces):
+    clusters, staging = pieces[3], pieces[4]
+
+    assert "stage" not in nyx.cluster_ordering(clusters).columns
+    named = nyx.cluster_ordering(clusters, staging.cluster_to_stage)
+    assert set(named["stage"]) == set(staging.cluster_to_stage.values())
+
+
+def test_the_plot_shows_the_same_order_as_the_table(pieces):
+    """They have to agree, or the table cannot be used to read the plot."""
+    import nyx.report as report
+
+    clusters = pieces[3]
+    ax = report.plot_clusters(clusters)
+
+    legend = " ".join(t.get_text() for t in ax.get_legend().get_texts())
+    for position in range(len(clusters.unique_labels)):
+        assert f"#{position}" in legend
+
+    # Centroid annotations carry the rank and the coordinates.
+    annotations = " ".join(t.get_text() for t in ax.texts)
+    assert "#0" in annotations
+    assert "(" in annotations and ")" in annotations
+
+
+def test_elliptic_orders_by_id_in_the_table_too(synthetic_recording, params, pieces):
+    """assign_stages orders elliptic by id, not centroid; the table must agree
+    or it would describe a mapping that is not the one applied."""
+    from nyx.pipeline import cluster_order
+
+    emg, wake_sleep, pca, *_ = pieces
+    clusters = nyx.cluster_sleep(
+        pca, wake_sleep,
+        clustering={"method": "elliptic", "pcs_to_use": [0, 1], "use_emg": True,
+                    "elliptic_contamination": 0.1},
+        emg=emg,
+    )
+    assert cluster_order(clusters) == sorted(int(c) for c in clusters.unique_labels)
+    assert list(nyx.cluster_ordering(clusters)["cluster"]) == cluster_order(clusters)

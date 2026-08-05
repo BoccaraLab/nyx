@@ -49,6 +49,7 @@ __all__ = [
     "plot_pca_components",
     "plot_pca_grid",
     "plot_clusters",
+    "cluster_ordering",
     "plot_psd_per_cluster",
     "plot_cluster_check",
     "plot_wake_sleep",
@@ -339,6 +340,40 @@ def plot_pca_grid(pca, *, n: int | None = None, figsize=(14, 6)):
     return fig
 
 
+def cluster_ordering(clusters, stages=None):
+    """The cluster ordering ``stage_order`` maps onto, with the centroids.
+
+    ``stage_order`` names clusters by their position in this order, so this
+    table is what tells you which name is going where. That matters because the
+    order is often **not** readable off the scatter plot: two centroids a
+    hundredth apart on PC1 look identical there, and swapping them silently
+    swaps two stages.
+
+    Returns a DataFrame, one row per cluster, ordered as the names are applied.
+    """
+    import pandas as pd
+
+    from nyx.pipeline import cluster_order
+
+    stages = _stages_of(clusters, stages)
+    clusters = _piece(clusters, "clusters")
+
+    sizes = clusters.sizes()
+    rows = []
+    for position, cid in enumerate(cluster_order(clusters)):
+        row = {"order": position, "cluster": cid}
+        for axis, pc in enumerate(clusters.pcs_to_use):
+            row[f"PC{pc + 1}"] = round(float(clusters.centers[cid, axis]), 4)
+        if clusters.centers.shape[1] > len(clusters.pcs_to_use):
+            row["EMG"] = round(float(clusters.centers[cid, len(clusters.pcs_to_use)]), 4)
+        row["epochs"] = sizes.get(cid, 0)
+        if stages:
+            row["stage"] = stages.get(cid, "")
+        rows.append(row)
+
+    return pd.DataFrame(rows).set_index("order")
+
+
 def plot_clusters(clusters, ax=None, *, stages=None, max_points: int = 20_000):
     """Sleep epochs in the space the clustering actually used.
 
@@ -363,25 +398,38 @@ def plot_clusters(clusters, ax=None, *, stages=None, max_points: int = 20_000):
     labels = clusters.labels[keep]
     outliers = clusters.outlier_mask[keep]
 
+    from nyx.pipeline import cluster_order
+
+    # The position of each cluster in the order stage_order names them. Shown
+    # because it is what the naming actually depends on, and it is not readable
+    # off the plot when two centroids sit close together.
+    rank = {cid: position for position, cid in enumerate(cluster_order(clusters))}
+
     for i, cid in enumerate(clusters.unique_labels):
         mask = labels == cid
         ax.scatter(points[mask, 0], points[mask, 1],
                    s=5, alpha=0.45, color=_cluster_colour(i), rasterized=True,
-                   label=_cluster_label(cid, stages))
+                   label=f"#{rank[int(cid)]}  {_cluster_label(cid, stages)}")
     if outliers.any():
         ax.scatter(points[outliers, 0], points[outliers, 1],
                    s=5, alpha=0.3, color="0.6", rasterized=True,
                    label="outlier -> NOSIGNAL")
 
-    for i, centre in enumerate(clusters.centers):
+    for cid in clusters.unique_labels:
+        centre = clusters.centers[int(cid)]
         ax.scatter(centre[0], centre[1], marker="x", s=110, c="k", lw=2, zorder=5)
-        ax.annotate(f"C{i}", (centre[0], centre[1]), xytext=(6, 4),
-                    textcoords="offset points", fontweight="bold", fontsize=9)
+        ax.annotate(
+            f"#{rank[int(cid)]} C{int(cid)}\n({centre[0]:+.2f}, {centre[1]:+.2f})"
+            if clusters.centers.shape[1] > 1
+            else f"#{rank[int(cid)]} C{int(cid)}\n({centre[0]:+.2f})",
+            (centre[0], centre[1]), xytext=(7, 5), textcoords="offset points",
+            fontweight="bold", fontsize=8, zorder=6,
+        )
 
     pcs = clusters.pcs_to_use
     ax.set_xlabel(f"PC{pcs[0] + 1}")
     ax.set_ylabel(f"PC{pcs[1] + 1}" if len(pcs) > 1 else "")
-    ax.set_title("Clusters")
+    ax.set_title("Clusters  (#n = the order stage_order names them in)")
     _legend(ax, fontsize=8, markerscale=2)
     return _despine(ax)
 

@@ -71,6 +71,7 @@ __all__ = [
     "compute_sleep_pca",
     "cluster_sleep",
     "assign_stages",
+    "cluster_order",
     "evaluate",
     "score_recording",
     "save_results",
@@ -462,6 +463,28 @@ def _emg_aligned_to_sleep_epochs(
 # ---------------------------------------------------------------------------
 
 
+def cluster_order(clusters: SleepClusters) -> list[int]:
+    """Cluster ids in the order ``stage_order`` names them, first name first.
+
+    This is the *only* thing that decides which cluster gets which stage name,
+    so it is worth being able to read it directly: when two centroids are close
+    the order is not something you can see in a scatter plot, and getting it
+    wrong silently swaps two stages. :func:`nyx.cluster_ordering` prints it with
+    the centroid coordinates beside it.
+    """
+    if clusters.params.get("method") == "elliptic":
+        # Its two clusters are "the bulk" and "the tail", in that order -- a
+        # meaning the centroid does not carry. Ordering by centroid instead
+        # flips the mapping depending on which side of the first component the
+        # tail happens to sit, which is arbitrary and varies by recording.
+        return [int(cid) for cid in sorted(clusters.unique_labels)]
+    return [
+        int(cid)
+        for cid in sorted(clusters.unique_labels,
+                          key=lambda cid: clusters.centers[cid, 0])
+    ]
+
+
 def assign_stages(
     clusters: SleepClusters,
     pca: SleepPca,
@@ -489,16 +512,7 @@ def assign_stages(
     short to be a real bout -- are not applied here. They belong to the params'
     ``postprocess`` list; see :mod:`nyx.postprocess`.
     """
-    if clusters.params.get("method") == "elliptic":
-        # Its two clusters are "the bulk" and "the tail", in that order -- a
-        # meaning the centroid does not carry. Ordering by centroid instead
-        # flips the mapping depending on which side of the first component the
-        # tail happens to sit, which is arbitrary and varies by recording.
-        ordered = sorted(clusters.unique_labels)
-    else:
-        ordered = sorted(
-            clusters.unique_labels, key=lambda cid: clusters.centers[cid, 0]
-        )
+    ordered = cluster_order(clusters)
     cluster_to_stage: dict[int, str] = {}
     unnamed: list[int] = []
     for position, cluster_id in enumerate(ordered):

@@ -57,6 +57,7 @@ from nyx.postprocess import apply_rules
 from nyx.preprocessing import preprocess_recording
 from nyx.queue import Queue, open_queue
 from nyx.report import (
+    cluster_ordering,
     plot_cluster_check,
     plot_clusters,
     plot_emg_check,
@@ -116,6 +117,7 @@ __all__ = [
     "plot_clusters",
     "plot_psd_per_cluster",
     "plot_cluster_check",
+    "cluster_ordering",
     # step 0: look at the signal
     "check_signals",
     "SignalCheck",
