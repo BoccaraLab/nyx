@@ -1,6 +1,6 @@
 # Examples
 
-Work through them in order. The first three need **no data at all** — they run
+Work through them in order. The first two need **no data at all** — they run
 on a synthetic recording, so you can see how everything fits together before
 pointing nyx at your own files.
 
@@ -8,9 +8,8 @@ pointing nyx at your own files.
 |---|---|---|
 | [`01_score_recording.ipynb`](01_score_recording.ipynb) | nothing | one recording, step by step, and the four decisions that are yours |
 | [`02_signal_check.ipynb`](02_signal_check.ipynb) | nothing | looking at the signal first: mains interference, artefacts, and what fixing them is worth |
-| [`03_batch_queue.ipynb`](03_batch_queue.ipynb) | nothing | many recordings, interactively or headless, without losing your place |
-| [`04_human_five_stage.ipynb`](04_human_five_stage.ipynb) | a human PSG recording | multi-step scoring, five stages, and collapsing to coarser ones |
-| [`05_real_data.ipynb`](05_real_data.ipynb) | one 78 MB download | a real mouse recording scored against a ten-expert consensus |
+| [`04_human_five_stage.ipynb`](04_human_five_stage.ipynb) | a human PSG recording | the human pipeline start to end: four steps, five stages, and collapsing to coarser ones |
+| [`05_real_data.ipynb`](05_real_data.ipynb) | one 78 MB download | the rodent pipeline start to end, on a real mouse recording scored against a ten-expert consensus |
 
 There is also [`run_demo.py`](run_demo.py), which needs nothing and no notebook
 server:
@@ -33,7 +32,7 @@ jupyter lab
 
 ## A caution about the synthetic data
 
-The synthetic signal in notebooks 01–03 is built to contain exactly the
+The synthetic signal in notebooks 01–02 is built to contain exactly the
 structure nyx looks for, so it scores near-perfectly. That makes it good for
 learning the mechanics and for checking an installation, and **useless as a
 measure of how well nyx works**. Notebook 05 is the honest one: a real recording,

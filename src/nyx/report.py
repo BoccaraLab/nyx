@@ -306,14 +306,25 @@ def _subsample(n: int, max_points: int) -> np.ndarray:
     return keep
 
 
-def plot_pca_grid(pca, *, n: int | None = None, figsize=(14, 6)):
+def plot_pca_grid(pca, *, n: int | None = None, smooth: float = 0.0,
+                  figsize=(14, 6)):
     """One panel per principal component, rather than all on one axis.
 
     Easier to read than :func:`plot_pca_components` when you are deciding
     whether the components describe sleep at all -- a component dominated by one
     narrow peak is describing an artefact or residual mains, and that is obvious
     here and easy to miss in an overlay.
+
+    Parameters
+    ----------
+    smooth
+        Gaussian sigma, in frequency bins, applied to the curves **for display
+        only**. Human recordings analysed at a fine frequency resolution give
+        visibly noisy loadings, and the shape is what you are reading. Leave at
+        0 for rodents, where the bins are wide enough already.
     """
+    from scipy.ndimage import gaussian_filter1d
+
     pca = _piece(pca, "pca")
     total = pca.pca.n_components_
     n = total if n is None else min(n, total)
@@ -327,7 +338,10 @@ def plot_pca_grid(pca, *, n: int | None = None, figsize=(14, 6)):
         if i >= n:
             ax.set_visible(False)
             continue
-        ax.plot(pca.freqs, pca.pca.components_[i], lw=1.4)
+        loading = pca.pca.components_[i]
+        if smooth:
+            loading = gaussian_filter1d(loading, sigma=float(smooth))
+        ax.plot(pca.freqs, loading, lw=1.4)
         ax.axhline(0, color="0.8", lw=0.8)
         ax.set_title(f"PC{i + 1}: {100 * pca.explained_variance_ratio[i]:.1f}% var",
                      fontsize=10)

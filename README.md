@@ -99,17 +99,16 @@ print(result.agreement.summary())
 
 ## Notebooks
 
-Five, in [`examples/`](examples/). The first three need **no data at all**:
+In [`examples/`](examples/). The first two need **no data at all**:
 
 | | needs | covers |
 |---|---|---|
 | [`01_score_recording`](examples/01_score_recording.ipynb) | nothing | one recording step by step, and the four decisions that are yours |
 | [`02_signal_check`](examples/02_signal_check.ipynb) | nothing | mains interference and artefacts, and what fixing them is worth |
-| [`03_batch_queue`](examples/03_batch_queue.ipynb) | nothing | many recordings, interactively or headless |
-| [`04_human_five_stage`](examples/04_human_five_stage.ipynb) | a human PSG | multi-step scoring and stage granularity |
+| [`04_human_five_stage`](examples/04_human_five_stage.ipynb) | a human PSG | the human pipeline start to end: four steps, five stages, and collapsing to coarser ones |
 | [`05_real_data`](examples/05_real_data.ipynb) | one 78 MB download | a real mouse recording against a ten-expert consensus |
 
-Start with `01`. Note that the synthetic signal used in `01`–`03` is built to
+Start with `01`. Note that the synthetic signal used in `01`–`02` is built to
 contain exactly the structure nyx looks for, so it scores near-perfectly — it
 shows you the mechanics, not the accuracy. `05` is the honest one.
 
