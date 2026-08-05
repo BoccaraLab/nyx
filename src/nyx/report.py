@@ -463,7 +463,7 @@ def _feature_names(clusters) -> list[str]:
 
 def plot_cluster_features(clusters, *, stages=None, max_points: int = 20_000,
                           cmap: str = "RdYlBu_r", columns: int = 3, figsize=None):
-    """The same scatter again, coloured by each of the other features in turn.
+    """The same scatter again, coloured by each feature the axes do not show.
 
     The cluster plot shows two dimensions, but the clustering used more --
     further components, and the EMG power when ``use_emg`` is set. Two clusters
@@ -473,6 +473,11 @@ def plot_cluster_features(clusters, *, stages=None, max_points: int = 20_000,
     Read it when the clusters look like one smear, or when you cannot tell why
     the algorithm split where it did: the panel whose colour changes across the
     boundary is the feature that drew it.
+
+    Only the features beyond the two on the axes get a panel -- colouring by
+    PC1 or PC2 would restate the axes rather than add anything. A clustering on
+    two components with no EMG therefore has nothing further to show, and the
+    figure says so.
     """
     stages = _stages_of(clusters, stages)
     clusters = _piece(clusters, "clusters")
@@ -484,8 +489,9 @@ def plot_cluster_features(clusters, *, stages=None, max_points: int = 20_000,
     inliers = ~clusters.outlier_mask[keep]
 
     x, y = points[:, 0], points[:, 1] if points.shape[1] > 1 else np.zeros(len(points))
-    # Every feature except the one already on the x axis.
-    extras = list(range(1, len(names)))
+    # Only the features the scatter does not already show. Colouring by PC1 or
+    # PC2 would just restate the axes.
+    extras = list(range(2, len(names)))
     panels = 1 + len(extras)
 
     columns = min(panels, columns)
@@ -501,6 +507,14 @@ def plot_cluster_features(clusters, *, stages=None, max_points: int = 20_000,
                        marker="x", s=110, c="k", lw=2, zorder=5)
 
     plot_clusters(clusters, flat[0], stages=stages, max_points=max_points)
+
+    if not extras:
+        # Two components and no EMG: the axes already are the whole feature
+        # space. Say that rather than returning a lone panel that looks like
+        # something failed to draw.
+        flat[0].set_title(
+            f"Clusters -- {names[0]} and {names[-1]} are the only features used"
+        )
 
     for panel, column in enumerate(extras, start=1):
         ax = flat[panel]

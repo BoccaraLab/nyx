@@ -431,18 +431,19 @@ def test_cluster_features_draws_one_panel_per_other_feature(pieces):
                     "pcs_to_use": [0, 1, 2, 3], "use_emg": True},
         emg=emg,
     )
-    figure = report.plot_cluster_features(clusters)
-    visible = [ax for ax in figure.axes if ax.get_visible()]
+    titles = [ax.get_title() for ax in report.plot_cluster_features(clusters).axes]
 
-    # PC1..PC4 + EMG = 5 features; panel 0 is the clusters, then one per
-    # feature other than the x axis, plus a colorbar axis for each of those.
-    titles = [ax.get_title() for ax in visible]
     assert any("Clusters" in t for t in titles)
-    for name in ("PC2", "PC3", "PC4", "EMG power"):
+    for name in ("PC3", "PC4", "EMG power"):
         assert any(f"coloured by {name}" == t for t in titles), name
 
+    # PC1 and PC2 are the axes; colouring by them would restate the plot.
+    assert not any("coloured by PC1" == t or "coloured by PC2" == t for t in titles)
 
-def test_cluster_features_without_emg_has_no_emg_panel(pieces):
+
+def test_cluster_features_says_so_when_the_axes_are_the_whole_space(pieces):
+    """Two components and no EMG: nothing is left to colour by, and a lone panel
+    would look like something failed to draw."""
     import nyx.report as report
 
     emg, wake_sleep, pca, *_ = pieces
@@ -454,8 +455,23 @@ def test_cluster_features_without_emg_has_no_emg_panel(pieces):
     )
     titles = [ax.get_title() for ax in report.plot_cluster_features(clusters).axes]
 
-    assert any("coloured by PC2" == t for t in titles)
-    assert not any("EMG" in t for t in titles)
+    assert any("only features used" in t for t in titles)
+    assert not any("coloured by" in t for t in titles)
+
+
+def test_emg_gets_a_panel_even_with_two_components(pieces):
+    import nyx.report as report
+
+    emg, wake_sleep, pca, *_ = pieces
+    clusters = nyx.cluster_sleep(
+        pca, wake_sleep,
+        clustering={"method": "kmeans", "n_clusters": 2, "pcs_to_use": [0, 1],
+                    "use_emg": True},
+        emg=emg,
+    )
+    titles = [ax.get_title() for ax in report.plot_cluster_features(clusters).axes]
+
+    assert any("coloured by EMG power" == t for t in titles)
 
 
 def test_cluster_features_takes_a_whole_result_too(scored):
