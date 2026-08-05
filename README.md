@@ -179,12 +179,51 @@ data/m01.edf,scores/m01.csv,0,1
 data/m02.edf,,0,1
 ```
 
+Open it as a **queue**, which remembers where you got to:
+
 ```python
-for config in nyx.load_manifest("recordings.csv", params="params/mouse.json"):
-    recording, reference = config.load()
-    result = nyx.score_recording(recording, config.params, reference=reference)
-    nyx.save_results(result, config.output_dir)
+queue = nyx.open_queue("recordings.csv", params="params/mouse.json")
+queue.print_status()
 ```
+
+There are two ways through it, for two different jobs.
+
+**Interactive — scoring a study.** Each recording needs looking at, so the queue
+hands them out one at a time and rewrites `config.json` as it goes:
+
+```python
+config = queue.next()          # writes config.json, pointing at this recording
+# ... run your notebook, adjust the threshold and cluster mapping, save ...
+queue.done()                   # or queue.skip("EMG disconnected")
+```
+
+The notebook reads that one file and is never edited between recordings:
+
+```python
+config = nyx.load_config("config.json")
+recording, reference = config.load()
+```
+
+`skip` takes a reason, and keeps it — so "why is there no result for m07" still
+has an answer next year.
+
+**Headless — reproducing a result.** No interaction, everything as written:
+
+```python
+nyx.open_queue("reruns.csv").run_all()
+```
+
+Point that at saved `run.json` files and every decision is already recorded, so
+nothing is left to choose. Running it on *unseen* recordings scores them on
+defaults, which are a starting point rather than an answer — that is what the
+interactive loop is for. A recording that fails is recorded as failed with its
+error and the batch carries on; one unreadable file should not cost you the
+other forty.
+
+Either way, progress survives the session ending. A recording whose output
+folder already has a `run.json` counts as scored even if the state file is
+gone, so the queue is still right after you delete it, or when a colleague
+scored part of the list on another machine.
 
 ### Public datasets
 

@@ -77,7 +77,10 @@ def load_manifest(
     path
         The CSV file.
     params
-        Parameter file to use for rows that do not name their own.
+        Parameter file to use for rows that do not name their own. Resolved
+        relative to the *current* directory, since that is where you typed it;
+        a ``params`` column resolves relative to the manifest, like the other
+        paths in it.
     output_root
         Where results go; each row gets a subfolder.
     **defaults
@@ -88,6 +91,14 @@ def load_manifest(
         raise FileNotFoundError(f"Manifest not found: {path}")
 
     base = os.path.dirname(os.path.abspath(path))
+
+    # A `params` column is part of the manifest and resolves against it, like
+    # every other path there. The `params=` argument is not -- it was typed by
+    # the caller, in the caller's directory, so resolve it there before the
+    # manifest's own rule can claim it.
+    if params:
+        params = os.path.abspath(params)
+
     configs: list[RunConfig] = []
 
     with open(path, newline="", encoding="utf-8-sig") as handle:

@@ -55,6 +55,7 @@ from nyx.pipeline import (
 )
 from nyx.postprocess import apply_rules
 from nyx.preprocessing import preprocess_recording
+from nyx.queue import Queue, open_queue
 from nyx.report import plot_scoring_overview, plot_summary, save_report
 from nyx.steps import Refinement, Step, run_step, run_steps
 from nyx.types import (
@@ -79,6 +80,8 @@ __all__ = [
     "RunConfig",
     "load_manifest",
     "write_manifest",
+    "open_queue",
+    "Queue",
     # multi-step scoring
     "Step",
     "Refinement",
