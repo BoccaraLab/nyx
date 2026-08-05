@@ -355,3 +355,131 @@ def test_refinement_on_a_missing_pc_is_reported(synthetic_recording, params, sco
 
     with pytest.raises(ValueError, match="PC99"):
         run_step(synthetic_recording, params, wake_sleep.hypnogram, step, emg=emg)
+
+
+# ---------------------------------------------------------------------------
+# Renaming clusters after the fact
+# ---------------------------------------------------------------------------
+#
+# Naming clusters is a decision you make after seeing the per-cluster spectra,
+# and getting it wrong first time is normal. Editing the Step and running it
+# again would recompute the PCA and the clustering to arrive at exactly the same
+# clusters -- minutes on a night of data, for a relabelling.
+
+
+@pytest.fixture
+def one_step(synthetic_recording, params, scored):
+    emg, wake_sleep = scored
+    step = Step("split_sleep", within="SLEEP", method="kmeans", n_clusters=2,
+                pcs_to_use=[0, 1], stage_order=["REM", "NREM"])
+    outcome = run_step(synthetic_recording, params, wake_sleep.hypnogram, step,
+                       emg=emg)
+    return wake_sleep, outcome
+
+
+def test_renaming_by_position(one_step):
+    from nyx.steps import rename_clusters
+
+    _ws, outcome = one_step
+    flipped = rename_clusters(outcome, stage_order=["NREM", "REM"])
+
+    assert outcome.cluster_to_stage == {0: "REM", 1: "NREM"}
+    assert flipped.cluster_to_stage == {0: "NREM", 1: "REM"}
+
+
+def test_renaming_by_cluster_id(one_step):
+    from nyx.steps import rename_clusters
+
+    _ws, outcome = one_step
+    named = rename_clusters(outcome, cluster_to_stage={0: "NREM", 1: "REM"})
+
+    assert named.cluster_to_stage == {0: "NREM", 1: "REM"}
+
+
+def test_renaming_does_not_recluster(one_step):
+    """The whole point: the expensive part is reused, not repeated."""
+    from nyx.steps import rename_clusters
+
+    _ws, outcome = one_step
+    renamed = rename_clusters(outcome, stage_order=["NREM", "REM"])
+
+    assert renamed.clusters is outcome.clusters
+    assert renamed.pca is outcome.pca
+
+
+def test_renaming_leaves_the_original_alone(one_step):
+    from nyx.steps import rename_clusters
+
+    _ws, outcome = one_step
+    before = dict(outcome.cluster_to_stage)
+    labels_before = outcome.hypnogram["label"].copy()
+
+    rename_clusters(outcome, stage_order=["NREM", "REM"])
+
+    assert outcome.cluster_to_stage == before
+    assert np.array_equal(outcome.hypnogram["label"], labels_before)
+
+
+def test_renaming_rebuilds_the_hypnogram(one_step):
+    """Not just the mapping -- the labelled output has to follow."""
+    from nyx.steps import rename_clusters
+
+    _ws, outcome = one_step
+
+    def seconds(outcome, stage):
+        return sum(float(d) for d, l in zip(outcome.hypnogram["duration"],
+                                            outcome.hypnogram["label"]) if l == stage)
+
+    flipped = rename_clusters(outcome, stage_order=["NREM", "REM"])
+
+    assert seconds(flipped, "REM") == pytest.approx(seconds(outcome, "NREM"))
+    assert seconds(flipped, "NREM") == pytest.approx(seconds(outcome, "REM"))
+
+
+def test_renaming_matches_running_the_step_again(synthetic_recording, params,
+                                                 scored, one_step):
+    """It must be indistinguishable from the slow route, or it is a second
+    implementation of the naming rule."""
+    from nyx.steps import rename_clusters
+
+    emg, wake_sleep = scored
+    _ws, outcome = one_step
+
+    renamed = rename_clusters(outcome, stage_order=["NREM", "REM"])
+    rerun = run_step(
+        synthetic_recording, params, wake_sleep.hypnogram,
+        Step("split_sleep", within="SLEEP", method="kmeans", n_clusters=2,
+             pcs_to_use=[0, 1], stage_order=["NREM", "REM"]),
+        emg=emg,
+    )
+
+    assert renamed.cluster_to_stage == rerun.cluster_to_stage
+    assert np.array_equal(renamed.labels, rerun.labels)
+    assert np.array_equal(renamed.hypnogram["label"], rerun.hypnogram["label"])
+
+
+def test_refinements_can_be_added_without_reclustering(one_step):
+    from nyx.steps import Refinement, rename_clusters
+
+    _ws, outcome = one_step
+    refined = rename_clusters(
+        outcome,
+        stage_order=["REM", "NREM"],
+        refinements=[Refinement(split_stage="NREM", pc=0, threshold=0.0,
+                                high="NREM3", low="NREM2")],
+    )
+
+    assert {"NREM2", "NREM3"} & set(refined.hypnogram["label"])
+    assert refined.clusters is outcome.clusters
+
+
+def test_an_outcome_built_by_hand_says_why_it_cannot_be_renamed(one_step):
+    from dataclasses import replace
+
+    from nyx.steps import rename_clusters
+
+    _ws, outcome = one_step
+    orphan = replace(outcome, input_hypnogram=None)
+
+    with pytest.raises(ValueError, match="cannot be relabelled"):
+        rename_clusters(orphan)

@@ -45,6 +45,7 @@ __all__ = [
     "StepOutcome",
     "run_step",
     "run_steps",
+    "rename_clusters",
     "steps_from_params",
     "epoch_labels",
 ]
@@ -176,6 +177,9 @@ class StepOutcome:
     pca: Any
     clusters: Any
     cluster_to_stage: dict[int, str]
+    #: The labelling this step was run on. Kept so :func:`rename_clusters` can
+    #: rebuild the output without re-running anything.
+    input_hypnogram: dict[str, np.ndarray] | None = None
 
     def summary(self) -> str:
         sizes = self.clusters.sizes()
@@ -241,6 +245,20 @@ def run_step(
     )
     clusters = cluster_sleep(pca, scope, clustering=step.clustering_params(), emg=emg)
 
+    return _label(step, hypnogram, pca, clusters)
+
+
+def _label(step: Step, hypnogram: dict, pca, clusters) -> StepOutcome:
+    """Name the clusters and write the result back onto the epoch grid.
+
+    Split out of :func:`run_step` so :func:`rename_clusters` can redo it without
+    recomputing the PCA or the clustering, which is the expensive part.
+    """
+    from nyx.pipeline import assign_stages
+    from nyx.types import WakeSleep
+
+    scope = WakeSleep(hypnogram=hypnogram, threshold=0.0, nosignal_threshold=0.0)
+
     staging = assign_stages(
         clusters,
         pca,
@@ -277,7 +295,49 @@ def run_step(
         pca=pca,
         clusters=clusters,
         cluster_to_stage=staging.cluster_to_stage,
+        input_hypnogram=hypnogram,
     )
+
+
+def rename_clusters(outcome: StepOutcome, stage_order=None,
+                    cluster_to_stage=None, refinements=None) -> StepOutcome:
+    """Give a finished step's clusters different names, without re-clustering.
+
+    Naming clusters is a decision you make *after* seeing the per-cluster
+    spectra, and it is normal to get it wrong first time. Editing the
+    :class:`Step` and calling :func:`run_step` again would recompute the PCA and
+    the clustering to reach the same clusters -- minutes, on a night of data,
+    for a relabelling that changes nothing about them.
+
+    Pass ``stage_order`` to name clusters by position, ``cluster_to_stage`` to
+    name them by id, or both -- ids are applied over positions, as in
+    :func:`nyx.assign_stages`.
+
+        out = run_step(recording, params, hypnogram, step, emg=emg)
+        nyx.plot_cluster_check(out.pca, clusters=out.clusters)   # ...look...
+        out = nyx.rename_clusters(out, stage_order=["NREM", "REM"])
+
+    Returns a new outcome; the original is untouched.
+    """
+    if outcome.input_hypnogram is None:
+        raise ValueError(
+            "This outcome does not carry the labelling it was run on, so it "
+            "cannot be relabelled. It was probably built by hand rather than by "
+            "run_step; pass input_hypnogram when constructing it."
+        )
+
+    from dataclasses import replace as _replace
+
+    changes = {}
+    if stage_order is not None:
+        changes["stage_order"] = list(stage_order)
+    if cluster_to_stage is not None:
+        changes["cluster_to_stage"] = {int(k): str(v) for k, v in cluster_to_stage.items()}
+    if refinements is not None:
+        changes["refinements"] = list(refinements)
+
+    step = _replace(outcome.step, **changes)
+    return _label(step, outcome.input_hypnogram, outcome.pca, outcome.clusters)
 
 
 def run_steps(

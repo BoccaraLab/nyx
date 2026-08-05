@@ -70,7 +70,7 @@ from nyx.report import (
     plot_wake_sleep,
     save_report,
 )
-from nyx.steps import Refinement, Step, run_step, run_steps
+from nyx.steps import Refinement, Step, rename_clusters, run_step, run_steps
 from nyx.types import (
     Agreement,
     EmgFeatures,
@@ -100,6 +100,7 @@ __all__ = [
     "Refinement",
     "run_step",
     "run_steps",
+    "rename_clusters",
     "collapse",
     # try it without any data
     "demo_recording",
