@@ -185,13 +185,21 @@ class SignalCheck:
         # Attaching a colorbar to the axes instead steals width from it, which
         # leaves the spectrograms narrower than the traces above them and the
         # time axes no longer lining up.
+        # Three grid columns per preview: the panel, its colorbar, and a spacer.
+        # Without the spacer the next preview's y-label and tick labels are drawn
+        # on top of the previous one's colorbar. The last preview needs no
+        # spacer, but keeping one costs only a margin and keeps the arithmetic
+        # below uniform.
         fig = plt.figure(figsize=figsize)
-        grid = fig.add_gridspec(n_rows, 2 * n, width_ratios=[30, 1] * n,
-                                wspace=0.08, hspace=0.3)
-        axes = [[fig.add_subplot(grid[row, 2 * col]) for col in range(n)]
+        grid = fig.add_gridspec(n_rows, 3 * n, width_ratios=[30, 1, 7] * n,
+                                wspace=0.1, hspace=0.35)
+        axes = [[fig.add_subplot(grid[row, 3 * col]) for col in range(n)]
                 for row in range(n_rows)]
-        colorbar_axes = [[fig.add_subplot(grid[row, 2 * col + 1]) for col in range(n)]
+        colorbar_axes = [[fig.add_subplot(grid[row, 3 * col + 1]) for col in range(n)]
                          for row in range(n_rows)]
+        for row in range(n_rows):  # the spacer columns hold nothing
+            for col in range(n):
+                fig.add_subplot(grid[row, 3 * col + 2]).axis("off")
         for row in range(0, n_rows, 2):  # trace rows have no colorbar
             for cax in colorbar_axes[row]:
                 cax.axis("off")
