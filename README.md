@@ -151,6 +151,24 @@ Channels are selected by position **or** by name (`eeg_channel="C3_M2"`).
 Anything unusual can be registered from your own code — see
 `nyx.io.register_recording_reader` and `register_annotation_reader`.
 
+### No EMG?
+
+EMG power is what separates wake from sleep, so losing it costs real accuracy —
+mostly in REM, which without it looks much like quiet wake. If the preparation
+has two or more wideband channels, build a surrogate from them instead of going
+without:
+
+```python
+emg = nyx.emg_from_lfp([si.load("lfp/"), si.load("ecog/")])
+result = nyx.score_recording(recording, params, emg=emg)
+```
+
+Muscle is volume-conducted, so it appears on every electrode at once while
+brain activity stays local. Band-passing 275–600 Hz and measuring how much the
+channels agree recovers a usable tone signal. Failing that,
+`emg_channel=None` with `params/mouse_no_emg.json` scores from the EEG alone —
+nyx will warn, and you should check the per-cluster spectra every time.
+
 ### Many recordings
 
 Batches are driven by a CSV, one row per recording:

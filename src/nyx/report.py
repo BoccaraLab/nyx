@@ -85,6 +85,15 @@ def _stage_rows(labels) -> list[str]:
 def plot_emg_threshold(result, ax=None):
     """EMG power distribution with the wake/sleep cut drawn on it."""
     ax = ax or plt.subplots(figsize=(6, 4))[1]
+    if result.emg is None:
+        ax.text(0.5, 0.5, "no EMG channel\n(wake came out of the EEG)",
+                transform=ax.transAxes, ha="center", va="center", fontsize=9,
+                color="crimson")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_title("EMG threshold")
+        return _despine(ax)
+
     power = result.emg.power
     nosignal = result.wake_sleep.nosignal_threshold
     threshold = result.wake_sleep.threshold
@@ -272,16 +281,20 @@ def plot_scoring_overview(result, max_points: int = 4000, figsize=None):
         ])
     )
 
-    emg_times = np.arange(len(recording.emg_trace())) / recording.emg_fs
     eeg_times = np.arange(len(recording.eeg_trace())) / recording.fs
 
-    subplots = [
+    subplots = []
+    if result.emg is not None:
         # EMG first: it is what separates wake from sleep.
-        {"type": "trace", "data": [emg_times, recording.emg_trace()],
-         "label": "EMG", "lw": 0.3, "color": "#333333", "height": 1},
-        {"type": "spectrogram",
-         "data": [result.emg.freqs, result.emg.times, result.emg.spectrogram],
-         "label": "power", "ylabel": "EMG (Hz)", "height": 2},
+        emg_times = np.arange(len(recording.emg_trace())) / recording.emg_fs
+        subplots += [
+            {"type": "trace", "data": [emg_times, recording.emg_trace()],
+             "label": "EMG", "lw": 0.3, "color": "#333333", "height": 1},
+            {"type": "spectrogram",
+             "data": [result.emg.freqs, result.emg.times, result.emg.spectrogram],
+             "label": "power", "ylabel": "EMG (Hz)", "height": 2},
+        ]
+    subplots += [
         {"type": "trace", "data": [eeg_times, recording.eeg_trace()],
          "label": "EEG", "lw": 0.3, "color": "#333333", "height": 1},
         {"type": "spectrogram",

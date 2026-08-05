@@ -81,13 +81,33 @@ class SignalPreview:
     end: float
     times: np.ndarray
     eeg: np.ndarray
-    emg: np.ndarray
+    #: ``None`` when the recording has no EMG channel.
+    emg: np.ndarray | None
     eeg_spectrogram: tuple[np.ndarray, np.ndarray, np.ndarray]  # (Sxx, freqs, times)
-    emg_spectrogram: tuple[np.ndarray, np.ndarray, np.ndarray]
+    emg_spectrogram: tuple[np.ndarray, np.ndarray, np.ndarray] | None
+
+    @property
+    def channels(self) -> tuple[str, ...]:
+        """The channels this preview has, EMG first -- it is what you look at
+        first, being the one that separates wake from sleep."""
+        return ("EEG",) if self.emg is None else ("EMG", "EEG")
+
+    def trace(self, channel: str) -> np.ndarray:
+        return self.eeg if channel.lower() == "eeg" else self.emg
+
+    def spectrogram(self, channel: str):
+        return (self.eeg_spectrogram if channel.lower() == "eeg"
+                else self.emg_spectrogram)
 
     def mean_spectrum(self, channel: str = "eeg") -> tuple[np.ndarray, np.ndarray]:
         """Time-averaged spectrum, as ``(freqs, power)``."""
-        Sxx, freqs, _ = self.eeg_spectrogram if channel == "eeg" else self.emg_spectrogram
+        spectrogram = self.spectrogram(channel)
+        if spectrogram is None:
+            raise ValueError(
+                f"This recording has no {channel.upper()} channel, so it has no "
+                f"{channel.upper()} spectrum."
+            )
+        Sxx, freqs, _ = spectrogram
         return freqs, Sxx.mean(axis=1)
 
 
@@ -157,29 +177,28 @@ class SignalCheck:
         import matplotlib.pyplot as plt
 
         n = len(self.previews)
-        figsize = figsize or (9 * n, 10)
+        channels = self.previews[0].channels
+        n_rows = 2 * len(channels)  # a trace and a spectrogram per channel
+        figsize = figsize or (9 * n, 5 * len(channels))
 
         # Give each colorbar its own grid column, as generate_custom_plot does.
         # Attaching a colorbar to the axes instead steals width from it, which
         # leaves the spectrograms narrower than the traces above them and the
         # time axes no longer lining up.
         fig = plt.figure(figsize=figsize)
-        grid = fig.add_gridspec(4, 2 * n, width_ratios=[30, 1] * n,
+        grid = fig.add_gridspec(n_rows, 2 * n, width_ratios=[30, 1] * n,
                                 wspace=0.08, hspace=0.3)
         axes = [[fig.add_subplot(grid[row, 2 * col]) for col in range(n)]
-                for row in range(4)]
+                for row in range(n_rows)]
         colorbar_axes = [[fig.add_subplot(grid[row, 2 * col + 1]) for col in range(n)]
-                         for row in range(4)]
-        for row in (0, 2):  # trace rows have no colorbar
+                         for row in range(n_rows)]
+        for row in range(0, n_rows, 2):  # trace rows have no colorbar
             for cax in colorbar_axes[row]:
                 cax.axis("off")
 
         for col, preview in enumerate(self.previews):
-            # EMG first: it is what separates wake from sleep, so it is the
-            # channel you look at first.
-            for row, (channel, trace) in enumerate(
-                (("EMG", preview.emg), ("EEG", preview.eeg))
-            ):
+            for row, channel in enumerate(preview.channels):
+                trace = preview.trace(channel)
                 ax_trace = axes[row * 2][col]
                 ax_spec = axes[row * 2 + 1][col]
 
@@ -196,9 +215,7 @@ class SignalCheck:
                         f"{preview.name}  ({preview.start:.0f}-{preview.end:.0f}s)"
                     )
 
-                Sxx, freqs, times = (
-                    preview.eeg_spectrogram if channel == "EEG" else preview.emg_spectrogram
-                )
+                Sxx, freqs, times = preview.spectrogram(channel)
                 top = fmax or freqs[-1]
                 band = freqs <= top
                 mesh = ax_spec.pcolormesh(
@@ -285,13 +302,19 @@ def check_signals(
         if notch:
             # Preview what the notch would do, without altering the recording.
             settings = {"notch": float(notch)}
-            eeg_rec = preprocess_channel(window.eeg, settings)
-            emg_rec = preprocess_channel(window.emg, settings)
-            eeg = eeg_rec.get_traces(return_in_uV=return_in_uV)[:, 0]
-            emg = emg_rec.get_traces(return_in_uV=return_in_uV)[:, 0]
+            eeg = preprocess_channel(window.eeg, settings).get_traces(
+                return_in_uV=return_in_uV
+            )[:, 0]
+            emg = (
+                None if window.emg is None
+                else preprocess_channel(window.emg, settings).get_traces(
+                    return_in_uV=return_in_uV
+                )[:, 0]
+            )
         else:
             eeg = window.eeg_trace(return_in_uV=return_in_uV)
-            emg = window.emg_trace(return_in_uV=return_in_uV)
+            emg = (None if window.emg is None
+                   else window.emg_trace(return_in_uV=return_in_uV))
 
         previews.append(
             SignalPreview(
@@ -302,7 +325,10 @@ def check_signals(
                 eeg=eeg,
                 emg=emg,
                 eeg_spectrogram=_preview_spectrogram(eeg, fs, binsize, fmax),
-                emg_spectrogram=_preview_spectrogram(emg, window.emg_fs, binsize, fmax),
+                emg_spectrogram=(
+                    None if emg is None
+                    else _preview_spectrogram(emg, window.emg_fs, binsize, fmax)
+                ),
             )
         )
 
@@ -316,7 +342,8 @@ def check_signals(
 
     # Score mains pickup on the first previewed window, averaged over time.
     first = previews[0]
-    for channel in ("eeg", "emg"):
+    channels = ("eeg",) if first.emg is None else ("eeg", "emg")
+    for channel in channels:
         freqs, spectrum = first.mean_spectrum(channel)
         for mains in _MAINS_FREQUENCIES:
             if mains < fmax:

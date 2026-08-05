@@ -135,8 +135,11 @@ class ScoringResult:
 
 def compute_emg_features(
     recording: Recording, params: dict, return_in_uV: bool = False
-) -> EmgFeatures:
+) -> EmgFeatures | None:
     """Compute the EMG spectrogram and collapse it to a band-power trace.
+
+    Returns ``None`` when the recording has no EMG channel, so that callers can
+    branch on that rather than on a channel index.
 
     Parameters
     ----------
@@ -148,6 +151,9 @@ def compute_emg_features(
         Convert the raw trace to microvolts first. Only meaningful if the file
         carries a valid gain; the published analyses used ``False``.
     """
+    if not recording.has_emg:
+        return None
+
     # The EMG may be sampled differently from the EEG, as it is in several
     # polysomnography formats, so use its own rate rather than the recording's.
     trace = recording.emg_trace(return_in_uV=return_in_uV)
@@ -336,7 +342,12 @@ def cluster_sleep(
 
     if use_emg:
         if emg is None:
-            raise ValueError("use_emg is enabled but no EmgFeatures were passed.")
+            raise ValueError(
+                "This step sets use_emg, but the recording has no EMG channel "
+                "(or none was passed). Set use_emg false on every step, or give "
+                "the recording an EMG -- nyx.emg_from_lfp builds a surrogate "
+                "from wideband channels. See params/mouse_no_emg.json."
+            )
         emg_aligned = _emg_aligned_to_sleep_epochs(emg, wake_sleep, pca.fs)
         n = min(len(features), len(emg_aligned))
         features = np.column_stack([features[:n], emg_aligned[:n]])
@@ -633,6 +644,7 @@ def score_recording(
     nosignal_threshold: float = 0.0,
     stage_order: Sequence[str] = ("REM", "NREM"),
     cluster_overrides: dict[int, str] | None = None,
+    emg: EmgFeatures | None = None,
     return_in_uV: bool = False,
     verbose: bool = True,
 ) -> ScoringResult:
@@ -655,6 +667,10 @@ def score_recording(
         when omitted, that step is skipped entirely.
     emg_threshold
         Override the automatic wake/sleep threshold.
+    emg
+        Use this EMG feature trace instead of computing one from the recording's
+        EMG channel. The way to score with a surrogate built by
+        :func:`nyx.emg_from_lfp` when there is no real EMG.
     """
     from nyx.preprocessing import preprocess_recording
 
@@ -680,17 +696,36 @@ def score_recording(
     if nosignal_threshold == 0.0:
         nosignal_threshold = float(declared.get("nosignal_threshold") or 0.0)
 
-    emg = compute_emg_features(windowed, params, return_in_uV=return_in_uV)
-    wake_sleep = classify_wake_sleep(
-        emg,
-        threshold=emg_threshold,
-        nosignal_threshold=nosignal_threshold,
-        min_duration=min_duration,
-    )
-    if verbose:
-        print(
-            f"  EMG threshold: {wake_sleep.threshold:.3f} ({wake_sleep.threshold_source})"
+    if emg is None:
+        emg = compute_emg_features(windowed, params, return_in_uV=return_in_uV)
+
+    if emg is None:
+        # No EMG: there is nothing to threshold, so everything starts as SLEEP
+        # and the clustering steps have to find wake in the EEG themselves.
+        wake_sleep = _everything_is_sleep(windowed, params, return_in_uV=return_in_uV)
+        warnings.warn(
+            "Scoring without an EMG channel. Wake has to be recovered from the "
+            "EEG spectrum alone, where quiet wake and REM look much alike, so "
+            "expect noticeably worse agreement -- REM especially. If the file "
+            "has other wideband channels, nyx.emg_from_lfp builds a surrogate "
+            "from them, which is far better than nothing. Check the "
+            "per-cluster spectra before trusting the result.",
+            stacklevel=2,
         )
+        if verbose:
+            print("  no EMG: every epoch starts as SLEEP")
+    else:
+        wake_sleep = classify_wake_sleep(
+            emg,
+            threshold=emg_threshold,
+            nosignal_threshold=nosignal_threshold,
+            min_duration=min_duration,
+        )
+        if verbose:
+            print(
+                f"  EMG threshold: {wake_sleep.threshold:.3f} "
+                f"({wake_sleep.threshold_source})"
+            )
 
     outcomes: list = []
     clustering_steps = _clustering_steps(params)
@@ -761,6 +796,37 @@ def score_recording(
         params=params,
         reference=trimmed_reference,
         steps=outcomes,
+    )
+
+
+def _everything_is_sleep(
+    recording: Recording, params: dict, return_in_uV: bool = False
+) -> WakeSleep:
+    """A starting hypnogram labelling the whole window SLEEP.
+
+    Used when there is no EMG to threshold. The epoch grid has to match the one
+    the EEG features land on, so it is derived from the EEG spectrogram's time
+    vector rather than assumed.
+    """
+    from nyx.features import compute_time_frequency, feature_method
+
+    _, _, times = compute_time_frequency(
+        recording.eeg_trace(return_in_uV=return_in_uV),
+        recording.fs,
+        params["EEG"],
+        method=feature_method(params),
+    )
+    duration = float(len(times) * (times[1] - times[0])) if len(times) > 1 else 0.0
+
+    return WakeSleep(
+        hypnogram={
+            "time": np.array([0.0]),
+            "duration": np.array([duration]),
+            "label": np.array(["SLEEP"], dtype="U"),
+        },
+        threshold=float("nan"),
+        nosignal_threshold=float("nan"),
+        threshold_source="none",
     )
 
 
@@ -855,7 +921,7 @@ def save_results(
         with open(os.path.join(output_dir, "config.json"), "w") as handle:
             json.dump(config, handle, indent=4, default=str)
 
-    if save_emg_power:
+    if save_emg_power and result.emg is not None:
         np.save(os.path.join(output_dir, "emg_power.npy"), result.emg.power)
 
     save_hypno_with_padding(

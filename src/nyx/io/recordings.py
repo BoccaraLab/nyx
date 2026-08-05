@@ -106,9 +106,13 @@ def _resolve_channel(rec, spec: ChannelSpec):
 
 
 def _split_channels(rec, eeg_channel: ChannelSpec, emg_channel: ChannelSpec):
-    """Split a multi-channel recording into single-channel EEG and EMG recordings."""
+    """Split a multi-channel recording into single-channel EEG and EMG recordings.
+
+    ``emg_channel=None`` means the file has no EMG, or you do not want to use it.
+    """
     eeg = rec.select_channels([_resolve_channel(rec, eeg_channel)])
-    emg = rec.select_channels([_resolve_channel(rec, emg_channel)])
+    emg = (None if emg_channel is None
+           else rec.select_channels([_resolve_channel(rec, emg_channel)]))
     return eeg, emg, float(rec.get_sampling_frequency())
 
 
@@ -170,10 +174,12 @@ def _read_edf(path: str, eeg_channel: ChannelSpec, emg_channel: ChannelSpec, **k
         try:
             names = [reader.getLabel(i) for i in range(reader.signals_in_file)]
             eeg_idx = _resolve_index_by_name(eeg_channel, names, "EEG")
-            emg_idx = _resolve_index_by_name(emg_channel, names, "EMG")
             fs = float(reader.getSampleFrequency(eeg_idx))
             eeg = _as_single_channel(reader.readSignal(eeg_idx), fs, names[eeg_idx])
-            emg = _as_single_channel(reader.readSignal(emg_idx), fs, names[emg_idx])
+            emg = None
+            if emg_channel is not None:
+                emg_idx = _resolve_index_by_name(emg_channel, names, "EMG")
+                emg = _as_single_channel(reader.readSignal(emg_idx), fs, names[emg_idx])
         finally:
             reader.close()
         return eeg, emg, fs
@@ -187,10 +193,14 @@ def _read_edf(path: str, eeg_channel: ChannelSpec, emg_channel: ChannelSpec, **k
         raw = mne.io.read_raw_edf(path, preload=True, verbose=False)
         names = list(raw.ch_names)
         eeg_idx = _resolve_index_by_name(eeg_channel, names, "EEG")
-        emg_idx = _resolve_index_by_name(emg_channel, names, "EMG")
         fs = float(raw.info["sfreq"])
         eeg = _as_single_channel(raw.get_data(picks=[names[eeg_idx]])[0], fs, names[eeg_idx])
-        emg = _as_single_channel(raw.get_data(picks=[names[emg_idx]])[0], fs, names[emg_idx])
+        emg = None
+        if emg_channel is not None:
+            emg_idx = _resolve_index_by_name(emg_channel, names, "EMG")
+            emg = _as_single_channel(
+                raw.get_data(picks=[names[emg_idx]])[0], fs, names[emg_idx]
+            )
         return eeg, emg, fs
     except Exception as exc:  # noqa: BLE001
         errors.append(f"mne: {exc}")
@@ -230,10 +240,12 @@ def _read_spikeinterface(
 def _read_npz(path: str, eeg_channel: ChannelSpec, emg_channel: ChannelSpec, **kwargs):
     """Read a ``.npz`` archive holding ``eeg``, ``emg`` and (optionally) ``fs``.
 
-    ``eeg_channel``/``emg_channel`` are ignored: the arrays are already named.
+    The arrays are already named, so ``eeg_channel`` is ignored. Passing
+    ``emg_channel=None`` skips the EMG even when the archive has one.
     """
     data = np.load(path)
-    missing = [key for key in ("eeg", "emg") if key not in data]
+    wanted = ("eeg",) if emg_channel is None else ("eeg", "emg")
+    missing = [key for key in wanted if key not in data]
     if missing:
         raise KeyError(
             f"{path!r} is missing the {missing} array(s). Expected keys: 'eeg', 'emg', "
@@ -245,7 +257,8 @@ def _read_npz(path: str, eeg_channel: ChannelSpec, emg_channel: ChannelSpec, **k
             f"{path!r} has no 'fs' array; pass the sampling rate explicitly, e.g. fs=256."
         )
     eeg = _as_single_channel(np.asarray(data["eeg"], dtype=float), fs, "EEG")
-    emg = _as_single_channel(np.asarray(data["emg"], dtype=float), fs, "EMG")
+    emg = (None if emg_channel is None
+           else _as_single_channel(np.asarray(data["emg"], dtype=float), fs, "EMG"))
     return eeg, emg, fs
 
 
@@ -273,6 +286,12 @@ def read_recording(
         path. Currently: ``"edf"``, ``"spikeinterface"``, ``"npz"``.
     eeg_channel, emg_channel
         Channel position (``0`` = first channel in the file) or channel name.
+        ``emg_channel=None`` loads no EMG at all -- possible, but a long way
+        from advisable: EMG power is what separates wake from sleep, and
+        without it wake has to come out of the EEG spectrum alone, where quiet
+        wake and REM look much alike. If the file has any other wideband
+        channels, :func:`nyx.emg_from_lfp` will build a surrogate from them,
+        which is far better than nothing.
     name
         Label carried through to the results; defaults to the file stem.
 

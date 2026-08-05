@@ -37,14 +37,21 @@ __all__ = [
 
 @dataclass
 class Recording:
-    """One EEG channel and one EMG channel from a single recording.
+    """One EEG channel, and usually one EMG channel, from a single recording.
 
     ``eeg`` and ``emg`` are single-channel spikeinterface recordings, which keeps
     the data lazy on disk until a trace is actually requested.
+
+    ``emg`` may be ``None``. Scoring without it is possible but **markedly
+    worse**: EMG power is what separates wake from sleep, and without it wake
+    has to be recovered from the EEG spectrum alone, where quiet wake and REM
+    look much alike. Prefer a surrogate over nothing -- see
+    :func:`nyx.emg_from_lfp`, which builds an EMG-like trace out of the
+    high-frequency correlation between wideband channels.
     """
 
     eeg: BaseRecording
-    emg: BaseRecording
+    emg: BaseRecording | None
     fs: float
     name: str = ""
     source_path: str = ""
@@ -52,6 +59,11 @@ class Recording:
     #: often store EMG in a separate stream at a different rate (CCSHS, for
     #: instance). ``None`` means the two share :attr:`fs`.
     emg_fs_: float | None = None
+
+    @property
+    def has_emg(self) -> bool:
+        """Whether this recording carries an EMG channel at all."""
+        return self.emg is not None
 
     @property
     def emg_fs(self) -> float:
@@ -69,7 +81,7 @@ class Recording:
 
     @property
     def emg_channel_name(self) -> str:
-        return self._channel_name(self.emg)
+        return self._channel_name(self.emg) if self.emg is not None else "none"
 
     @staticmethod
     def _channel_name(rec: BaseRecording) -> str:
@@ -87,7 +99,16 @@ class Recording:
         return self.eeg.get_traces(return_in_uV=return_in_uV)[:, 0]
 
     def emg_trace(self, return_in_uV: bool = False) -> np.ndarray:
-        """EMG as a 1-D float array."""
+        """EMG as a 1-D float array. Raises if there is no EMG channel."""
+        if self.emg is None:
+            raise ValueError(
+                f"{self.name or 'This recording'} has no EMG channel, so there is "
+                f"no EMG trace to read. Load one with emg_channel=..., or build a "
+                f"surrogate with nyx.emg_from_lfp. To score without any EMG at all, "
+                f"use a params file whose steps do not include an 'emg_threshold' "
+                f"step and whose clustering has use_emg false -- see "
+                f"params/mouse_no_emg.json."
+            )
         return self.emg.get_traces(return_in_uV=return_in_uV)[:, 0]
 
     def time_slice(self, start_time: float, end_time: float) -> Recording:
@@ -110,11 +131,15 @@ class Recording:
         if start_time == 0.0 and end_time >= last_sample_time:
             return self  # nothing to trim
 
-        # The EMG is sliced by time, so a different sampling rate is fine.
-        emg_end = min(end_time, (self.emg.get_num_samples() - 1) / self.emg_fs)
+        emg = None
+        if self.emg is not None:
+            # The EMG is sliced by time, so a different sampling rate is fine.
+            emg_end = min(end_time, (self.emg.get_num_samples() - 1) / self.emg_fs)
+            emg = self.emg.time_slice(start_time, max(emg_end, start_time + 1e-6))
+
         return Recording(
             eeg=self.eeg.time_slice(start_time, end_time),
-            emg=self.emg.time_slice(start_time, max(emg_end, start_time + 1e-6)),
+            emg=emg,
             fs=self.fs,
             name=self.name,
             source_path=self.source_path,
@@ -123,12 +148,17 @@ class Recording:
 
     def describe(self) -> str:
         """Human-readable summary, useful before choosing channel indices."""
-        emg_rate = "" if self.emg_fs == self.fs else f" at {self.emg_fs:g} Hz"
-        return (
+        header = (
             f"{self.name or 'recording'}: {self.duration:.1f}s at {self.fs:g} Hz\n"
             f"  EEG channel: {self.eeg_channel_name}\n"
-            f"  EMG channel: {self.emg_channel_name}{emg_rate}"
         )
+        if self.emg is None:
+            return header + (
+                "  EMG channel: none -- wake will have to come out of the EEG "
+                "alone, which is much less reliable"
+            )
+        emg_rate = "" if self.emg_fs == self.fs else f" at {self.emg_fs:g} Hz"
+        return header + f"  EMG channel: {self.emg_channel_name}{emg_rate}"
 
 
 @dataclass

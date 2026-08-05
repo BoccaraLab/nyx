@@ -28,6 +28,7 @@ from nyx.types import Recording
 __all__ = [
     "demo_recording",
     "demo_messy_recording",
+    "demo_wideband_recording",
     "demo_params",
     "make_demo_signals",
     "DEMO_BOUTS",
@@ -203,6 +204,51 @@ def _add_artefacts(eeg, emg, hypnogram, fs, seconds, rng):
         "duration": durations.astype("float64"),
         "label": labels.astype("U"),
     }
+
+
+def demo_wideband_recording(seed: int = 0, fs: float = 1500.0, n_channels: int = 4):
+    """Wideband channels carrying volume-conducted muscle, for the EMG-like path.
+
+    Returns a multi-channel spikeinterface recording sampled high enough for the
+    275-600 Hz band, plus the true hypnogram. Each channel gets its own
+    independent brain-band activity, and *shared* high-frequency noise during
+    wake -- which is what :func:`nyx.emg_from_lfp` detects: muscle appears on
+    every electrode at once, brain activity does not.
+
+    Sampled at 1500 Hz on purpose: the default band needs at least 1200 Hz, and
+    a recording downsampled below that is the usual reason the surrogate cannot
+    be built.
+    """
+    from spikeinterface.core import NumpyRecording
+
+    _, _, base_fs, hypnogram = make_demo_signals(seed=seed)
+    rng = np.random.default_rng(seed + 7)
+
+    n = int(float(np.sum(hypnogram["duration"])) * fs)
+    t = np.arange(n) / fs
+
+    # Muscle tone per sample, from the hypnogram: high in wake, low in sleep.
+    tone = np.zeros(n)
+    for time, duration, label in zip(
+        hypnogram["time"], hypnogram["duration"], hypnogram["label"]
+    ):
+        start, end = int(time * fs), int((time + duration) * fs)
+        tone[start:end] = 1.0 if str(label) == "WAKE" else 0.05
+
+    # One shared muscle waveform, added to every channel -- that is what makes
+    # them correlate. Broadband, so it lands inside the 275-600 Hz band.
+    muscle = tone * rng.standard_normal(n)
+
+    traces = np.empty((n, n_channels))
+    for channel in range(n_channels):
+        local = 40 * np.sin(2 * np.pi * (2.0 + channel) * t)
+        traces[:, channel] = local + 8 * rng.standard_normal(n) + 30 * muscle
+
+    recording = NumpyRecording([traces], float(fs))
+    recording.set_property(
+        key="channel_name", values=[f"LFP{i + 1}" for i in range(n_channels)]
+    )
+    return recording, hypnogram
 
 
 def demo_params() -> dict:

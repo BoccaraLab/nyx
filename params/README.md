@@ -18,6 +18,7 @@ it means the same thing on their data.
 | `human.json` | human PSG, five stages, three clustering steps |
 | `mouse_substages.json` | mouse, with NREM further split into NREM2, NREM3 and TR (transition) |
 | `mouse_scalogram.json` | `mouse.json` with the wavelet backend — see below |
+| `mouse_no_emg.json` | mouse with **no EMG channel at all** — a fallback, see below |
 
 These are **starting points, not fixed recipes.** Run one recording, look at the
 EMG threshold histogram and the per-cluster PSDs, and adjust. The defaults were
@@ -146,6 +147,32 @@ thresholding a component:
     "high": "NREM2", "low": "NREM1" }
 ]
 ```
+
+### When there is no EMG
+
+EMG power is what separates wake from sleep. Without it, wake has to come out
+of the EEG spectrum alone, where quiet wake and REM look much alike — so REM is
+what suffers. In order of preference:
+
+1. **Use the recorded EMG.** Everything above assumes this.
+2. **Build a surrogate**, if the preparation has two or more wideband channels
+   (LFP probes, ECoG screws — anything sampled above ~1200 Hz):
+
+   ```python
+   emg = nyx.emg_from_lfp([si.load("lfp/"), si.load("ecog/")])
+   result = nyx.score_recording(recording, params, emg=emg)
+   ```
+
+   Muscle potentials are volume-conducted, so a contraction appears on every
+   electrode at once while brain activity stays local. Band-pass 275–600 Hz and
+   ask how much the channels agree: high correlation means muscle. The result
+   is an ordinary `EmgFeatures`, so the threshold, the figures and `use_emg`
+   all work unchanged. Use channels that are far apart — neighbours on one
+   probe share brain signal too, and correlate for the wrong reason.
+3. **Score without any**, with `emg_channel=None` and `mouse_no_emg.json`.
+   Every epoch starts as SLEEP and one clustering step has to find all three
+   stages at once. nyx warns when you do this. Check the per-cluster PSDs every
+   time.
 
 ### Postprocessing
 

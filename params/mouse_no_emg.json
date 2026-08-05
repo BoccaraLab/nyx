@@ -1,0 +1,57 @@
+{
+    "_comment": "Mouse EEG with NO EMG channel. Read the recording with emg_channel=null. This is a fallback, not a recommendation: EMG power is what separates wake from sleep, and without it wake has to be recovered from the EEG spectrum alone, where quiet wake and REM look much alike -- REM is what suffers. If the preparation has any other wideband channels, build a surrogate with nyx.emg_from_lfp instead; it is far better than nothing. Check the per-cluster PSDs on every recording scored this way.",
+
+    "features": {
+        "method": "spectrogram"
+    },
+
+    "EEG": {
+        "min_freq": 0.5,
+        "max_freq": 40,
+        "binsize": 2,
+        "overlapratio": 0.5,
+        "time_smooth": 4,
+        "scaling": "density",
+        "detrend": "constant",
+        "mode": "psd",
+        "scale": "dB",
+        "normalized": "mean",
+        "notch": null,
+        "resample": null
+    },
+
+    "EMG": {
+        "_comment": "Kept so the file stays a valid params file, and so it still works if you later add an EMG channel. Nothing reads it while emg_channel is null.",
+        "min_freq": 30,
+        "max_freq": 100,
+        "binsize": 4,
+        "overlapratio": 0.5,
+        "time_smooth": 4,
+        "scaling": "density",
+        "detrend": "constant",
+        "mode": "psd",
+        "scale": "dB",
+        "normalized": "mean",
+        "notch": null,
+        "resample": null
+    },
+
+    "scoring": {
+        "pc_components": 6,
+        "min_duration": 4
+    },
+
+    "steps": [
+        {
+            "_comment": "No emg_threshold step: there is nothing to threshold. Every epoch starts as SLEEP and this one step has to find all three stages in the EEG spectral PCA at once. use_emg must be false everywhere -- with no EMG it would raise. Ordering by centroid on the first PC usually puts REM lowest and NREM highest, with wake in between, but that is exactly the assumption to check against the per-cluster PSDs.",
+            "name": "split_all",
+            "within": "SLEEP",
+            "method": "gmm",
+            "n_clusters": 3,
+            "pcs_to_use": [0, 1, 2],
+            "use_emg": false,
+            "outlier_z_threshold": 6,
+            "stage_order": ["REM", "WAKE", "NREM"]
+        }
+    ]
+}

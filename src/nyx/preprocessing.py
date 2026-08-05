@@ -180,10 +180,11 @@ def preprocess_recording(recording: Recording, params: dict) -> Recording:
     which measures mains pickup and names the frequency to notch.
     """
     eeg = preprocess_channel(recording.eeg, params.get("EEG", {}))
-    emg = preprocess_channel(recording.emg, params.get("EMG", {}))
+    emg = (None if recording.emg is None
+           else preprocess_channel(recording.emg, params.get("EMG", {})))
 
     eeg_fs = float(eeg.get_sampling_frequency())
-    emg_fs = float(emg.get_sampling_frequency())
+    emg_fs = eeg_fs if emg is None else float(emg.get_sampling_frequency())
 
     return Recording(
         eeg=eeg,

@@ -30,7 +30,13 @@ To stop partway and adjust something, call the steps yourself -- see
 __version__ = "0.1.0"
 
 from nyx.config import RunConfig, load_config, load_json, load_params
-from nyx.demo import demo_messy_recording, demo_params, demo_recording
+from nyx.demo import (
+    demo_messy_recording,
+    demo_params,
+    demo_recording,
+    demo_wideband_recording,
+)
+from nyx.emg_like import emg_from_lfp
 from nyx.granularity import collapse
 from nyx.inspect import SignalCheck, check_signals
 from nyx.io import read_annotations, read_recording
@@ -82,6 +88,7 @@ __all__ = [
     # try it without any data
     "demo_recording",
     "demo_messy_recording",
+    "demo_wideband_recording",
     "demo_params",
     # figures
     "plot_summary",
@@ -93,6 +100,7 @@ __all__ = [
     "preprocess_recording",
     "apply_rules",
     # pipeline steps
+    "emg_from_lfp",
     "compute_emg_features",
     "find_wake_sleep_threshold",
     "classify_wake_sleep",
