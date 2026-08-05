@@ -1,0 +1,30 @@
+{
+    "_comment": "One recording: where it is, which channels, which parameters, where results go. Copy to config.json and edit -- config.json is gitignored, because it points at one machine's data.",
+
+    "recording": {
+        "path": "data/m01.edf",
+        "format": "auto",
+        "eeg_channel": 0,
+        "emg_channel": 1
+    },
+
+    "_annotations_comment": "Optional. A reference scoring to compare against; delete this section if you do not have one. nyx produces a hypnogram either way.",
+    "annotations": {
+        "path": "scores/m01.csv",
+        "format": "epoch_csv",
+        "options": {
+            "epoch_length": 4,
+            "label_map": {"1": "WAKE", "2": "NREM", "3": "REM"}
+        }
+    },
+
+    "params": "params/mouse.json",
+
+    "_window_comment": "Analysis window in seconds. Delete to score the whole recording. Run nyx.check_signals(recording) first to see where usable signal starts and ends.",
+    "window": [0, 86400],
+
+    "output": {
+        "root": "results",
+        "name": "m01"
+    }
+}

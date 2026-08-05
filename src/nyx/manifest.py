@@ -82,7 +82,8 @@ def load_manifest(
         a ``params`` column resolves relative to the manifest, like the other
         paths in it.
     output_root
-        Where results go; each row gets a subfolder.
+        Where results go; each row gets a subfolder. Like ``params``, resolved
+        relative to the current directory rather than to the manifest.
     **defaults
         Applied to any row that leaves the corresponding column blank -- for
         example ``eeg_channel=0, data_root="/data"``.
@@ -92,12 +93,14 @@ def load_manifest(
 
     base = os.path.dirname(os.path.abspath(path))
 
-    # A `params` column is part of the manifest and resolves against it, like
-    # every other path there. The `params=` argument is not -- it was typed by
-    # the caller, in the caller's directory, so resolve it there before the
-    # manifest's own rule can claim it.
+    # Paths *in* the manifest resolve against the manifest, like every other
+    # path there. These two are arguments, typed by the caller in the caller's
+    # directory, so resolve them there before the manifest's rule can claim
+    # them -- otherwise `output_root="results"` lands inside the manifest's
+    # folder rather than beside the notebook that asked for it.
     if params:
         params = os.path.abspath(params)
+    output_root = os.path.abspath(output_root)
 
     configs: list[RunConfig] = []
 

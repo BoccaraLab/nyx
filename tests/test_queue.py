@@ -64,6 +64,25 @@ def test_a_fresh_queue_has_everything_pending(study):
     assert queue.scored == []
 
 
+def test_output_root_is_relative_to_you_not_to_the_manifest(study, tmp_path,
+                                                            monkeypatch):
+    """A relative output_root belongs where you typed it.
+
+    Resolving it against the manifest instead nests the results inside the
+    manifest's folder -- and with a relative path on both sides you get the
+    directory name twice: results/study/results/study/m00.
+    """
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+
+    queue = nyx.open_queue(study["manifest"], params=study["params"],
+                           output_root="results")
+
+    assert queue.configs[0].output_dir == str(work / "results" / "m00")
+    assert queue.state_path == str(work / "results" / "queue_state.json")
+
+
 def test_summary_names_what_is_next(study):
     text = open_it(study).summary()
 

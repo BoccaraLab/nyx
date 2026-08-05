@@ -97,8 +97,21 @@ result = nyx.score_recording(recording, params, reference=reference)
 print(result.agreement.summary())
 ```
 
-Start with [`examples/01_score_recording.ipynb`](examples/01_score_recording.ipynb),
-which walks through a single recording step by step.
+## Notebooks
+
+Five, in [`examples/`](examples/). The first three need **no data at all**:
+
+| | needs | covers |
+|---|---|---|
+| [`01_score_recording`](examples/01_score_recording.ipynb) | nothing | one recording step by step, and the four decisions that are yours |
+| [`02_signal_check`](examples/02_signal_check.ipynb) | nothing | mains interference and artefacts, and what fixing them is worth |
+| [`03_batch_queue`](examples/03_batch_queue.ipynb) | nothing | many recordings, interactively or headless |
+| [`04_human_five_stage`](examples/04_human_five_stage.ipynb) | a human PSG | multi-step scoring and stage granularity |
+| [`05_real_data`](examples/05_real_data.ipynb) | one 78 MB download | a real mouse recording against a ten-expert consensus |
+
+Start with `01`. Note that the synthetic signal used in `01`–`03` is built to
+contain exactly the structure nyx looks for, so it scores near-perfectly — it
+shows you the mechanics, not the accuracy. `05` is the honest one.
 
 ---
 
@@ -302,8 +315,9 @@ Signorelli L, Korchynska S, Ortiz C, Arena A, Wilhelm S, Boccara C. *Nyx: a
 flexible framework for sleep scoring across species, lifespan and modalities.*
 bioRxiv 2026. doi:[10.64898/2026.07.24.740558](https://doi.org/10.64898/2026.07.24.740558)
 
-Machine-readable metadata is in `CITATION.cff`. The analyses in the paper live in a separate
-repository, pinned to a specific nyx version.
+Machine-readable metadata is in [`CITATION.cff`](CITATION.cff); contributors are
+listed in [`AUTHORS.md`](AUTHORS.md). The analyses in the paper live in a
+separate repository, pinned to a specific nyx version.
 
 ## Licence
 

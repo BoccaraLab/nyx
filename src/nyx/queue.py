@@ -414,6 +414,10 @@ def open_queue(
     """
     configs = load_manifest(manifest, params=params, output_root=output_root, **defaults)
 
+    # Same resolution load_manifest applies, so the progress file lands beside
+    # the results rather than somewhere else relative to the same argument.
+    output_root = os.path.abspath(output_root)
+
     queue = Queue(
         configs=configs,
         output_root=output_root,

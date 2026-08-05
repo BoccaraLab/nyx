@@ -27,6 +27,9 @@ keywords:
   - unsupervised clustering
   - electrophysiology
 
+# CFF 1.2.0 has no field for contributor roles. Who did what follows the CRediT
+# roles in the paper's author contribution statement; AUTHORS.md points at it.
+# The list here is who to *cite*, which matches the paper.
 authors:
   - family-names: Signorelli
     given-names: Letizia

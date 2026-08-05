@@ -557,19 +557,50 @@ def _read_visbrain_hyp(path: str, **kwargs) -> dict[str, np.ndarray]:
 
     See http://visbrain.org/sleep.html#save-hypnogram. Adapted from
     https://github.com/paulbrodersen/somnotate/blob/master/example_pipeline/data_io.py
+
+    Each line is a stage name and the time that stage *ends*, so durations are
+    the differences between consecutive end times.
+
+    Writers disagree about the separator -- in the Oxford benchmark the human
+    scorers' files are tab-separated and somnotate's own output is
+    space-separated -- so the split is on any whitespace, from the right. That
+    also keeps stage names containing spaces intact. Header lines start with
+    ``*`` and are skipped however many there are, rather than assuming two.
     """
-    dtype = [("Stage", "|S30"), ("stop", float)]
-    data = np.genfromtxt(path, skip_header=2, dtype=dtype, delimiter="\t")
-    data = np.atleast_1d(data)
-    if data.size == 0:
+    times: list[float] = []
+    labels: list[str] = []
+    start = 0.0
+
+    with open(path, encoding="utf-8-sig") as handle:
+        for number, raw in enumerate(handle, start=1):
+            line = raw.strip()
+            if not line or line.startswith("*"):
+                continue
+            parts = line.rsplit(None, 1)
+            if len(parts) != 2:
+                raise ValueError(
+                    f"{path} line {number}: expected a stage name and an end time, "
+                    f"got {line!r}."
+                )
+            label, stop = parts
+            try:
+                stop = float(stop)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{path} line {number}: {stop!r} is not a time. A .hyp line is "
+                    f"'<stage> <end time in seconds>'."
+                ) from exc
+            times.append(stop)
+            labels.append(label.strip())
+
+    if not labels:
         return _empty()
 
-    states = [state.astype(str).strip() for state in data["Stage"]]
-    transitions = np.r_[0, data["stop"]]
+    transitions = np.r_[start, times]
     return {
         "time": np.asarray(transitions[:-1], dtype="float64"),
         "duration": np.asarray(transitions[1:] - transitions[:-1], dtype="float64"),
-        "label": np.asarray(states, dtype="U"),
+        "label": np.asarray(labels, dtype="U"),
     }
 
 
