@@ -268,3 +268,73 @@ def test_the_same_functions_still_take_a_whole_result(scored):
     report.plot_emg_check(scored)
     report.plot_cluster_check(scored)
     report.plot_pca_grid(scored)
+
+
+# ---------------------------------------------------------------------------
+# A reference scoring is normalised before it is drawn
+# ---------------------------------------------------------------------------
+
+
+def _hyp(*bouts):
+    return {
+        "time": np.cumsum([0.0] + [float(d) for _, d in bouts][:-1]),
+        "duration": np.asarray([float(d) for _, d in bouts]),
+        "label": np.asarray([label for label, _ in bouts], dtype="U"),
+    }
+
+
+def test_foreign_spellings_become_nyx_stages():
+    """The Oxford benchmark writes 'awake' and 'non-REM'; somnotate agrees."""
+    from nyx.metrics import normalise_labels
+
+    result = normalise_labels(_hyp(("awake", 30), ("non-REM", 60), ("REM", 30)))
+
+    assert list(result["label"]) == ["WAKE", "NREM", "REM"]
+    assert list(result["duration"]) == [30.0, 60.0, 30.0]
+
+
+def test_undefined_is_not_silently_called_nrem():
+    """It used to fall through to the NREM default, inventing sleep where the
+    scorer had explicitly declined to name a stage."""
+    from nyx.metrics import normalise_labels
+
+    result = normalise_labels(_hyp(("awake", 30), ("undefined", 10)))
+
+    assert list(result["label"]) == ["WAKE", "UNCLASSIFIED"]
+
+
+def test_no_signal_stays_distinct_from_unclassified():
+    """Different things: no usable signal, versus signal nobody could name."""
+    from nyx.metrics import normalise_labels
+
+    result = normalise_labels(_hyp(("NOSIGNAL", 10), ("undefined", 10)))
+
+    assert list(result["label"]) == ["NOSIGNAL", "UNCLASSIFIED"]
+
+
+def test_normalising_merges_what_it_makes_adjacent():
+    from nyx.metrics import normalise_labels
+
+    result = normalise_labels(_hyp(("awake", 30), ("WAKE", 30), ("W", 30)))
+
+    assert list(result["label"]) == ["WAKE"]
+    assert list(result["duration"]) == [90.0]
+
+
+def test_both_hypnograms_share_their_rows(synthetic_recording, params):
+    """A reference drawn in its own vocabulary gets no colour from the stage
+    palette, and a separate row for every spelling of the same stage."""
+    import nyx.report as report
+
+    foreign = _hyp(("awake", 900), ("non-REM", 900), ("REM", 600))
+    result = nyx.score_recording(synthetic_recording, params, window=(0, 2400),
+                                 reference=foreign, verbose=False)
+
+    figure = report.plot_scoring_overview(result)
+    rows = {
+        text.get_text()
+        for ax in figure.axes for text in ax.get_yticklabels()
+        if text.get_text()
+    }
+    assert "awake" not in rows and "non-REM" not in rows
+    assert {"WAKE", "NREM", "REM"} <= rows

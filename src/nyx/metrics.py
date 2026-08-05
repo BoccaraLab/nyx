@@ -215,6 +215,16 @@ def _aggregate_label(lbl):
     # Some label sets use 'S' for sleep or 'ASLEEP' - map to NREM by default
     if s in ('S','ASLEEP','SLEEP'):
         return 'SLEEP'
+    # No usable signal, as distinct from signal the scorer could not classify.
+    if s in ('NOSIGNAL', 'NO SIGNAL', 'NO_SIGNAL'):
+        return 'NOSIGNAL'
+    # Scored as "cannot tell". These have to be listed before the fallback
+    # below, which would otherwise call them NREM -- inventing sleep where the
+    # scorer explicitly declined to name a stage. The Oxford benchmark's
+    # 'undefined' is the common case.
+    if s in ('UNCLASSIFIED', 'UNDEFINED', 'UNSCORED', 'UNKNOWN',
+             'ARTEFACT', 'ARTIFACT', 'NONE', 'NAN', '?', '-', ''):
+        return 'UNCLASSIFIED'
     # fallback: if contains 'REM' anywhere -> REM, if contains 'W' or 'WA' -> WAKE, else NREM
     if 'REM' in s:
         return 'REM'
@@ -222,6 +232,34 @@ def _aggregate_label(lbl):
         return 'WAKE'
     # default to NREM
     return 'NREM'
+
+
+def normalise_labels(hypnogram: dict) -> dict:
+    """Rewrite a hypnogram's stage names into nyx's vocabulary.
+
+    ``awake`` becomes ``WAKE``, ``non-REM`` becomes ``NREM``, ``undefined``
+    becomes ``UNCLASSIFIED``, and so on -- the same mapping
+    :func:`compare_sleep` applies before measuring agreement.
+
+    Comparison did this internally and drawing did not, so a reference scoring
+    plotted beside nyx's own kept whatever spellings its file used: no colour in
+    the stage palette, and a separate hypnogram row for every spelling of the
+    same stage.
+
+    Adjacent intervals that end up sharing a label are merged.
+    """
+    from nyx.io.annotations import merge_consecutive
+
+    labels = [_aggregate_label(label) for label in hypnogram["label"]]
+    return merge_consecutive({
+        "time": np.asarray(hypnogram["time"], dtype="float64"),
+        "duration": np.asarray(hypnogram["duration"], dtype="float64"),
+        "label": np.asarray(
+            ["UNCLASSIFIED" if (label is None or pd.isna(label)) else str(label)
+             for label in labels],
+            dtype="U",
+        ),
+    })
 
 def compare_sleep(auto_data, manual_data, label_order = ['WAKE','QW','REM','NREM'], start=None, end=None, normalize_cm=False, plot=True, debug=False, verbose=True):
     """

@@ -60,12 +60,14 @@ __all__ = [
 
 CLUSTER_CMAP = "Set1"
 
-#: Stage order for hypnograms, top row first. NOSIGNAL sits above WAKE so that
-#: the rows run from "not scored" down through progressively deeper sleep.
-#: TR sits with the light NREM stages, above NREM2, since it is the shallowest
-#: of the three the rodent substage recipe separates.
+#: Stage order for hypnograms, top row first. The two "not scored" labels sit
+#: above WAKE, so the rows run from "no stage" down through progressively deeper
+#: sleep. NOSIGNAL is no usable signal; UNCLASSIFIED is signal a scorer declined
+#: to name. TR sits with the light NREM stages, above NREM2, being the
+#: shallowest of the three the rodent substage recipe separates.
 STAGE_ROW_ORDER = (
-    "NOSIGNAL", "WAKE", "REM", "NREM1", "NREM", "TR", "NREM2", "NREM3",
+    "NOSIGNAL", "UNCLASSIFIED", "WAKE", "REM", "NREM1", "NREM", "TR",
+    "NREM2", "NREM3",
 )
 
 
@@ -506,8 +508,17 @@ def plot_scoring_overview(result, max_points: int = 4000, figsize=None):
 
     from nyx.plotting import generate_custom_plot
 
+    from nyx.metrics import normalise_labels
+
     recording = result.recording
     reference = result.reference
+
+    # The reference keeps whatever spellings its file used -- 'awake',
+    # 'non-REM' -- which have no entry in the stage palette and would each get a
+    # hypnogram row of their own beside nyx's WAKE and NREM. Normalise it for
+    # drawing, exactly as the comparison does before measuring agreement.
+    if reference is not None:
+        reference = normalise_labels(reference)
 
     rows = _stage_rows(
         np.concatenate([
