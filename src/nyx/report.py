@@ -1,11 +1,13 @@
-"""Summary figures for a scoring run.
+"""Figures for a scoring run.
 
 The plots that tell you whether a run went well, in the order you would look at
 them:
 
 * :func:`plot_emg_threshold` -- did the wake/sleep cut land in a real valley?
-* :func:`plot_pca_components` -- do the components look like spectral shapes,
-  or like noise?
+* :func:`plot_emg_power` -- and does it track the animal being awake?
+* :func:`plot_wake_sleep` -- does the split look like a night?
+* :func:`plot_pca_components` / :func:`plot_pca_grid` -- do the components look
+  like spectral shapes, or like noise?
 * :func:`plot_clusters` -- are the clusters separated, or one smear?
 * :func:`plot_psd_per_cluster` -- **the one that matters.** NREM has more
   low-frequency power than REM; if the per-cluster spectra do not show that,
@@ -13,8 +15,20 @@ them:
 * :func:`plot_hypnogram_result` -- does the resulting night look plausible?
 * :func:`plot_confusion` -- only when a reference scoring exists.
 
-:func:`plot_summary` puts them on one page, and :func:`save_report` writes both
-the overview and the individual panels.
+Every one of them takes **either a whole**
+:class:`~nyx.pipeline.ScoringResult` **or the piece it draws**::
+
+    plot_clusters(result)                      # after a full run
+    plot_clusters(clusters, stages=mapping)    # partway through one
+
+That is what lets a notebook working step by step use the same figures as the
+finished report, rather than reimplementing them inline: partway through a run
+there is no ``ScoringResult`` yet, only the pieces.
+
+Three pairs come ready-combined, because they are only useful read together:
+:func:`plot_emg_check`, :func:`plot_cluster_check`, and :func:`plot_summary`,
+which puts the whole lot on one page. :func:`save_report` writes the overview
+and the individual panels.
 """
 
 from __future__ import annotations
@@ -30,9 +44,14 @@ from nyx.stages import COLORS
 __all__ = [
     "plot_scoring_overview",
     "plot_emg_threshold",
+    "plot_emg_power",
+    "plot_emg_check",
     "plot_pca_components",
+    "plot_pca_grid",
     "plot_clusters",
     "plot_psd_per_cluster",
+    "plot_cluster_check",
+    "plot_wake_sleep",
     "plot_hypnogram_result",
     "plot_confusion",
     "plot_summary",
@@ -52,6 +71,52 @@ STAGE_ROW_ORDER = (
 
 def _cluster_colour(index: int):
     return plt.get_cmap(CLUSTER_CMAP)(index % 9)
+
+
+def _is_result(obj) -> bool:
+    """Whether this is a whole :class:`~nyx.pipeline.ScoringResult`."""
+    return obj is not None and hasattr(obj, "staging") and hasattr(obj, "clusters")
+
+
+def _piece(obj, attribute: str):
+    """The panel's main argument: a ``ScoringResult``, or the piece itself.
+
+    Every panel below takes the object it draws -- the EMG features, the PCA,
+    the clusters -- and also accepts a whole ``ScoringResult``, pulling that
+    piece out of it. That is what lets a step-by-step notebook use the same
+    functions as the finished report: partway through a run there is no
+    ``ScoringResult`` yet, only the pieces.
+    """
+    return getattr(obj, attribute) if _is_result(obj) else obj
+
+
+def _extra(obj, attribute: str, given=None):
+    """A *second* piece a panel needs, e.g. the clusters alongside the PCA.
+
+    Distinct from :func:`_piece`: here the caller's own value wins, and the
+    result is only consulted when one was passed. Reading it off ``obj`` the way
+    ``_piece`` does would hand back the main argument under another name.
+    """
+    if given is not None:
+        return given
+    return getattr(obj, attribute, None) if _is_result(obj) else None
+
+
+def _stages_of(obj, given=None) -> dict:
+    """Cluster-to-stage mapping, from a result or from what the caller passed.
+
+    Before :func:`nyx.assign_stages` has run there is no mapping, so the
+    clusters are drawn as bare ids -- which is exactly the state you are in when
+    deciding what to call them.
+    """
+    if given is not None:
+        return dict(given)
+    return dict(obj.staging.cluster_to_stage) if _is_result(obj) else {}
+
+
+def _cluster_label(cid: int, stages: dict) -> str:
+    stage = stages.get(int(cid))
+    return f"C{cid} -> {stage}" if stage else f"C{cid}"
 
 
 def _despine(ax, keep=("left", "bottom")):
@@ -82,10 +147,20 @@ def _stage_rows(labels) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def plot_emg_threshold(result, ax=None):
-    """EMG power distribution with the wake/sleep cut drawn on it."""
+def plot_emg_threshold(emg, ax=None, *, wake_sleep=None, threshold=None,
+                       nosignal=0.0, source=""):
+    """EMG power distribution with the wake/sleep cut drawn on it.
+
+    Takes either a :class:`~nyx.pipeline.ScoringResult` or the
+    :class:`~nyx.types.EmgFeatures` on their own -- in which case pass the
+    ``threshold`` you are considering, or a ``wake_sleep`` to read it from.
+    """
     ax = ax or plt.subplots(figsize=(6, 4))[1]
-    if result.emg is None:
+
+    wake_sleep = _extra(emg, "wake_sleep", wake_sleep)
+    emg = _piece(emg, "emg")
+
+    if emg is None:
         ax.text(0.5, 0.5, "no EMG channel\n(wake came out of the EEG)",
                 transform=ax.transAxes, ha="center", va="center", fontsize=9,
                 color="crimson")
@@ -94,9 +169,17 @@ def plot_emg_threshold(result, ax=None):
         ax.set_title("EMG threshold")
         return _despine(ax)
 
-    power = result.emg.power
-    nosignal = result.wake_sleep.nosignal_threshold
-    threshold = result.wake_sleep.threshold
+    if wake_sleep is not None:
+        threshold = wake_sleep.threshold
+        nosignal = wake_sleep.nosignal_threshold
+        source = source or wake_sleep.threshold_source
+    if threshold is None:
+        raise ValueError(
+            "Pass a threshold to draw, or a wake_sleep (or a whole "
+            "ScoringResult) to read one from."
+        )
+
+    power = emg.power
 
     # Show the whole distribution, including what the no-signal cut removes --
     # otherwise you cannot see whether that cut is in a sensible place.
@@ -127,19 +210,77 @@ def plot_emg_threshold(result, ax=None):
 
     ax.set_xlabel("EMG power (scaled)")
     ax.set_ylabel("density")
-    ax.set_title(f"EMG threshold ({result.wake_sleep.threshold_source})")
+    ax.set_title("EMG threshold" + (f" ({source})" if source else ""))
     _legend(ax, fontsize=8)
     return _despine(ax)
 
 
-def plot_pca_components(result, ax=None, n: int = 4):
+def plot_emg_power(emg, ax=None, *, wake_sleep=None, threshold=None):
+    """EMG band power over time, with the wake/sleep cut across it.
+
+    The companion to :func:`plot_emg_threshold`: the histogram says whether the
+    cut sits in a valley, this says whether it tracks the animal actually being
+    awake. A threshold can look perfect in a histogram and still be in the wrong
+    place once you see it against time.
+    """
+    ax = ax or plt.subplots(figsize=(11, 3))[1]
+
+    wake_sleep = _extra(emg, "wake_sleep", wake_sleep)
+    emg = _piece(emg, "emg")
+    if emg is None:
+        ax.text(0.5, 0.5, "no EMG channel", transform=ax.transAxes,
+                ha="center", va="center", fontsize=9, color="crimson")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        return _despine(ax)
+
+    if wake_sleep is not None:
+        threshold = wake_sleep.threshold
+
+    times = np.arange(len(emg.power)) / emg.fs
+    ax.plot(times, emg.power, lw=0.4, color="#333333")
+
+    title = "EMG power over time"
+    if threshold is not None and threshold <= emg.power.max():
+        ax.axhline(threshold, color="crimson", ls="--", lw=1.5,
+                   label=f"wake/sleep = {threshold:.3f}")
+        # In the title rather than annotated on the axes: the threshold is
+        # often near the top of the range, so a corner label lands on the line.
+        above = 100.0 * float((emg.power > threshold).mean())
+        title += f"  --  {above:.1f}% above the cut"
+
+    ax.set_xlim(times[0], times[-1])
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("EMG power")
+    ax.set_title(title)
+    _legend(ax, fontsize=8, loc="upper right")
+    return _despine(ax)
+
+
+def plot_emg_check(emg, *, wake_sleep=None, threshold=None, nosignal=0.0,
+                   figsize=(14, 4)):
+    """The two EMG panels side by side: the distribution and the time course.
+
+    What you look at before accepting a wake/sleep threshold.
+    """
+    fig, (left, right) = plt.subplots(
+        1, 2, figsize=figsize, gridspec_kw={"width_ratios": [1, 2]}
+    )
+    plot_emg_threshold(emg, left, wake_sleep=wake_sleep, threshold=threshold,
+                       nosignal=nosignal)
+    plot_emg_power(emg, right, wake_sleep=wake_sleep, threshold=threshold)
+    fig.tight_layout()
+    return fig
+
+
+def plot_pca_components(pca, ax=None, *, n: int = 4):
     """Component loadings across frequency: what each PC actually measures.
 
-    ``ax`` is second in every panel function here, so they can be called
+    ``ax`` is second in every panel function here, so they can all be called
     uniformly as ``draw(result, ax)``.
     """
     ax = ax or plt.subplots(figsize=(6, 4))[1]
-    pca = result.pca
+    pca = _piece(pca, "pca")
 
     for i in range(min(n, pca.pca.n_components_)):
         variance = 100 * pca.explained_variance_ratio[i]
@@ -162,19 +303,58 @@ def _subsample(n: int, max_points: int) -> np.ndarray:
     return keep
 
 
-def plot_clusters(result, ax=None, max_points: int = 20_000):
+def plot_pca_grid(pca, *, n: int | None = None, figsize=(14, 6)):
+    """One panel per principal component, rather than all on one axis.
+
+    Easier to read than :func:`plot_pca_components` when you are deciding
+    whether the components describe sleep at all -- a component dominated by one
+    narrow peak is describing an artefact or residual mains, and that is obvious
+    here and easy to miss in an overlay.
+    """
+    pca = _piece(pca, "pca")
+    total = pca.pca.n_components_
+    n = total if n is None else min(n, total)
+
+    columns = min(n, 3)
+    rows = (n + columns - 1) // columns
+    fig, axes = plt.subplots(rows, columns, figsize=figsize, sharex=True,
+                             squeeze=False)
+
+    for i, ax in enumerate(axes.ravel()):
+        if i >= n:
+            ax.set_visible(False)
+            continue
+        ax.plot(pca.freqs, pca.pca.components_[i], lw=1.4)
+        ax.axhline(0, color="0.8", lw=0.8)
+        ax.set_title(f"PC{i + 1}: {100 * pca.explained_variance_ratio[i]:.1f}% var",
+                     fontsize=10)
+        ax.set_xlabel("Frequency (Hz)")
+        _despine(ax)
+    for ax in axes[:, 0]:
+        ax.set_ylabel("loading")
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_clusters(clusters, ax=None, *, stages=None, max_points: int = 20_000):
     """Sleep epochs in the space the clustering actually used.
 
-    ``max_points`` caps how many epochs are drawn per panel. The scalogram
-    backend produces one column per sample rather than per epoch, which is
-    millions of points -- more than a scatter plot can show anything with, and
-    enough to make the figure unopenable. The subsample is a fixed random draw,
-    so the picture is the same every time; the clustering itself always used
-    every point.
+    Takes either a :class:`~nyx.pipeline.ScoringResult` or the
+    :class:`~nyx.types.SleepClusters` on their own. Without a stage mapping the
+    clusters are drawn as bare ids, which is the state you are in when deciding
+    what to call them.
+
+    ``max_points`` caps how many epochs are drawn. The scalogram backend
+    produces one column per sample rather than per epoch, which is millions of
+    points -- more than a scatter plot can show anything with, and enough to
+    make the figure unopenable. The subsample is a fixed random draw, so the
+    picture is the same every time; the clustering itself always used every
+    point.
     """
     ax = ax or plt.subplots(figsize=(6, 5))[1]
-    clusters = result.clusters
-    stages = result.staging.cluster_to_stage
+    stages = _stages_of(clusters, stages)
+    clusters = _piece(clusters, "clusters")
 
     keep = _subsample(len(clusters.features_scaled), max_points)
     points = clusters.features_scaled[keep]
@@ -185,7 +365,7 @@ def plot_clusters(result, ax=None, max_points: int = 20_000):
         mask = labels == cid
         ax.scatter(points[mask, 0], points[mask, 1],
                    s=5, alpha=0.45, color=_cluster_colour(i), rasterized=True,
-                   label=f"C{cid} -> {stages.get(int(cid), '?')}")
+                   label=_cluster_label(cid, stages))
     if outliers.any():
         ax.scatter(points[outliers, 0], points[outliers, 1],
                    s=5, alpha=0.3, color="0.6", rasterized=True,
@@ -204,15 +384,24 @@ def plot_clusters(result, ax=None, max_points: int = 20_000):
     return _despine(ax)
 
 
-def plot_psd_per_cluster(result, ax=None):
+def plot_psd_per_cluster(pca, ax=None, *, clusters=None, stages=None):
     """Mean spectrum of each cluster, with a 95% interval.
 
-    The check that decides whether the stage assignment is right: NREM should
-    carry more low-frequency power than REM.
+    **The panel that decides whether the stage assignment is right**: NREM
+    carries more low-frequency power than REM, and if these spectra do not show
+    that, the assignment is wrong however clean the clusters look in PC space.
+
+    Takes either a :class:`~nyx.pipeline.ScoringResult` or the ``pca`` and
+    ``clusters`` separately.
     """
     ax = ax or plt.subplots(figsize=(6, 4))[1]
-    pca, clusters = result.pca, result.clusters
-    stages = result.staging.cluster_to_stage
+    stages = _stages_of(pca, stages)
+    clusters = _extra(pca, "clusters", clusters)
+    pca = _piece(pca, "pca")
+    if clusters is None:
+        raise ValueError(
+            "Pass the clusters to draw, or a whole ScoringResult to read them from."
+        )
 
     sleep_bins = ~np.any(np.isnan(pca.signal), axis=1)
     spectra = pca.spectrogram[:, sleep_bins][:, clusters.valid_mask]
@@ -226,7 +415,7 @@ def plot_psd_per_cluster(result, ax=None):
         ci = 1.96 * block.std(axis=1) / np.sqrt(mask.sum())
         colour = _cluster_colour(i)
         ax.plot(pca.freqs, mean, color=colour, lw=1.5,
-                label=f"C{cid} -> {stages.get(int(cid), '?')} (n={int(mask.sum())})")
+                label=f"{_cluster_label(cid, stages)} (n={int(mask.sum())})")
         ax.fill_between(pca.freqs, mean - ci, mean + ci, color=colour, alpha=0.25)
 
     ax.set_xlabel("Frequency (Hz)")
@@ -236,17 +425,63 @@ def plot_psd_per_cluster(result, ax=None):
     return _despine(ax)
 
 
-def plot_hypnogram_result(result, ax=None, max_hours: float | None = None):
-    """The scored night as a stepped hypnogram."""
+def plot_cluster_check(pca, *, clusters=None, stages=None, figsize=(14, 5)):
+    """Clusters in PC space beside their mean spectra.
+
+    The pair you look at before naming clusters. Read the **right** panel: the
+    left one only tells you the clustering separated something, the right one
+    tells you what that something is.
+    """
+    fig, (left, right) = plt.subplots(1, 2, figsize=figsize)
+    plot_clusters(_extra(pca, "clusters", clusters) or pca, left,
+                  stages=_stages_of(pca, stages))
+    plot_psd_per_cluster(pca, right, clusters=clusters, stages=stages)
+    right.set_title("Mean spectrum per cluster  <- read this one")
+    fig.tight_layout()
+    return fig
+
+
+def plot_wake_sleep(wake_sleep, ax=None):
+    """The wake/sleep/no-signal split, before any stage clustering.
+
+    Worth looking at on its own: everything after it only subdivides SLEEP, so
+    wake that is wrong here stays wrong.
+    """
+    import pandas as pd
+
+    from nyx.plotting import plot_hypnogram
+
+    ax = ax if ax is not None else plt.subplots(figsize=(12, 2.5))[1]
+    hypnogram = _piece(wake_sleep, "wake_sleep").hypnogram
+    plot_hypnogram(
+        pd.DataFrame(hypnogram),
+        possible_labels=_stage_rows(hypnogram["label"]),
+        title="Wake / sleep",
+        ax=ax,
+        xaxis_format="Hours",
+    )
+    return ax
+
+
+def plot_hypnogram_result(staging, ax=None, *, title: str = "Hypnogram"):
+    """The scored night as a stepped hypnogram.
+
+    Takes a :class:`~nyx.pipeline.ScoringResult`, a
+    :class:`~nyx.types.Staging`, or a plain hypnogram dict.
+    """
     import pandas as pd
 
     from nyx.plotting import plot_hypnogram
 
     ax = ax if ax is not None else plt.subplots(figsize=(12, 3))[1]
+
+    staging = _piece(staging, "staging")
+    hypnogram = getattr(staging, "hypnogram", staging)
+
     plot_hypnogram(
-        pd.DataFrame(result.staging.hypnogram),
-        possible_labels=_stage_rows(result.staging.hypnogram["label"]),
-        title="Hypnogram",
+        pd.DataFrame(hypnogram),
+        possible_labels=_stage_rows(hypnogram["label"]),
+        title=title,
         ax=ax,
         xaxis_format="Hours",
     )

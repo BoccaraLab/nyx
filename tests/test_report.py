@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import nyx
+import nyx.report as report
 from nyx.report import (
     plot_clusters,
     plot_confusion,
@@ -175,3 +176,95 @@ def test_a_failing_panel_does_not_lose_the_run(scored, tmp_path, monkeypatch):
 
     # The others still got written.
     assert (tmp_path / "plots" / "summary.png").exists()
+
+
+# ---------------------------------------------------------------------------
+# The panels take a piece, not only a finished run
+# ---------------------------------------------------------------------------
+#
+# This is what a step-by-step notebook needs: partway through a run there is no
+# ScoringResult yet, only the pieces. Without it the notebooks have to
+# reimplement every figure inline.
+
+
+@pytest.fixture(scope="module")
+def pieces(synthetic_recording, params):
+    """The intermediate objects, as a notebook has them between steps."""
+    emg = nyx.compute_emg_features(synthetic_recording, params)
+    wake_sleep = nyx.classify_wake_sleep(emg)
+    pca = nyx.compute_sleep_pca(synthetic_recording, params, wake_sleep)
+    clusters = nyx.cluster_sleep(pca, wake_sleep, clustering=params, emg=emg)
+    staging = nyx.assign_stages(clusters, pca, wake_sleep)
+    return emg, wake_sleep, pca, clusters, staging
+
+
+def test_emg_panels_take_the_features_alone(pieces):
+    emg, wake_sleep, *_ = pieces
+
+    report.plot_emg_threshold(emg, threshold=0.5)
+    report.plot_emg_threshold(emg, wake_sleep=wake_sleep)
+    report.plot_emg_power(emg, threshold=0.5)
+    report.plot_emg_check(emg, wake_sleep=wake_sleep)
+
+
+def test_a_threshold_must_come_from_somewhere(pieces):
+    """Silently drawing no line would look like a threshold of zero."""
+    emg = pieces[0]
+    with pytest.raises(ValueError, match="threshold"):
+        report.plot_emg_threshold(emg)
+
+
+def test_pca_panels_take_the_pca_alone(pieces):
+    pca = pieces[2]
+
+    report.plot_pca_components(pca)
+    figure = report.plot_pca_grid(pca, n=4)
+    assert len([ax for ax in figure.axes if ax.get_visible()]) == 4
+
+
+def test_cluster_panels_work_before_the_stages_are_named(pieces):
+    """The state you are in when deciding what to call them."""
+    _emg, _ws, pca, clusters, _staging = pieces
+
+    ax = report.plot_clusters(clusters)
+    labels = [text.get_text() for text in ax.get_legend().get_texts()]
+    # The cluster entries are bare ids; "outlier -> NOSIGNAL" is not one of them
+    # and does carry an arrow.
+    cluster_labels = [label for label in labels if not label.startswith("outlier")]
+    assert cluster_labels
+    assert not any("->" in label for label in cluster_labels), "no mapping was given"
+
+    report.plot_psd_per_cluster(pca, clusters=clusters)
+    report.plot_cluster_check(pca, clusters=clusters)
+
+
+def test_a_given_mapping_is_shown(pieces):
+    _emg, _ws, pca, clusters, staging = pieces
+
+    ax = report.plot_clusters(clusters, stages=staging.cluster_to_stage)
+    labels = " ".join(t.get_text() for t in ax.get_legend().get_texts())
+    assert "->" in labels
+
+
+def test_psd_without_clusters_says_so(pieces):
+    with pytest.raises(ValueError, match="clusters"):
+        report.plot_psd_per_cluster(pieces[2])
+
+
+def test_wake_sleep_panel_takes_the_split_alone(pieces):
+    report.plot_wake_sleep(pieces[1])
+
+
+def test_the_same_functions_still_take_a_whole_result(scored):
+    """The finished-run form must keep working, positionally as save_report
+    calls it."""
+    import matplotlib.pyplot as plt
+
+    for draw in (report.plot_emg_threshold, report.plot_pca_components,
+                 report.plot_clusters, report.plot_psd_per_cluster,
+                 report.plot_wake_sleep):
+        draw(scored, plt.subplots()[1])
+
+    report.plot_emg_check(scored)
+    report.plot_cluster_check(scored)
+    report.plot_pca_grid(scored)

@@ -56,7 +56,18 @@ from nyx.pipeline import (
 from nyx.postprocess import apply_rules
 from nyx.preprocessing import preprocess_recording
 from nyx.queue import Queue, open_queue
-from nyx.report import plot_scoring_overview, plot_summary, save_report
+from nyx.report import (
+    plot_cluster_check,
+    plot_clusters,
+    plot_emg_check,
+    plot_hypnogram_result,
+    plot_pca_grid,
+    plot_psd_per_cluster,
+    plot_scoring_overview,
+    plot_summary,
+    plot_wake_sleep,
+    save_report,
+)
 from nyx.steps import Refinement, Step, run_step, run_steps
 from nyx.types import (
     Agreement,
@@ -93,10 +104,18 @@ __all__ = [
     "demo_messy_recording",
     "demo_wideband_recording",
     "demo_params",
-    # figures
+    # figures. Each takes a whole ScoringResult *or* the piece it draws, so a
+    # notebook working step by step uses the same ones as the finished report.
     "plot_summary",
     "save_report",
     "plot_scoring_overview",
+    "plot_emg_check",
+    "plot_hypnogram_result",
+    "plot_wake_sleep",
+    "plot_pca_grid",
+    "plot_clusters",
+    "plot_psd_per_cluster",
+    "plot_cluster_check",
     # step 0: look at the signal
     "check_signals",
     "SignalCheck",
