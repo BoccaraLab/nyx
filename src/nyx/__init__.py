@@ -59,6 +59,7 @@ from nyx.queue import Queue, open_queue
 from nyx.report import (
     cluster_ordering,
     plot_cluster_check,
+    plot_cluster_features,
     plot_clusters,
     plot_emg_check,
     plot_hypnogram_result,
@@ -117,6 +118,7 @@ __all__ = [
     "plot_clusters",
     "plot_psd_per_cluster",
     "plot_cluster_check",
+    "plot_cluster_features",
     "cluster_ordering",
     # step 0: look at the signal
     "check_signals",

@@ -9,6 +9,9 @@ them:
 * :func:`plot_pca_components` / :func:`plot_pca_grid` -- do the components look
   like spectral shapes, or like noise?
 * :func:`plot_clusters` -- are the clusters separated, or one smear?
+* :func:`plot_cluster_features` -- the same scatter coloured by each of the
+  other features in turn. Clusters that overlap in the PC1/PC2 view are often
+  separated cleanly by a further component or by the EMG, and this shows which.
 * :func:`plot_psd_per_cluster` -- **the one that matters.** NREM has more
   low-frequency power than REM; if the per-cluster spectra do not show that,
   the stage assignment is wrong however good the clustering looks.
@@ -49,6 +52,7 @@ __all__ = [
     "plot_pca_components",
     "plot_pca_grid",
     "plot_clusters",
+    "plot_cluster_features",
     "cluster_ordering",
     "plot_psd_per_cluster",
     "plot_cluster_check",
@@ -448,6 +452,74 @@ def plot_clusters(clusters, ax=None, *, stages=None, max_points: int = 20_000):
     return _despine(ax)
 
 
+def _feature_names(clusters) -> list[str]:
+    """What each column of ``features_scaled`` is."""
+    names = [f"PC{pc + 1}" for pc in clusters.pcs_to_use]
+    # cluster_sleep appends EMG power as a trailing column when use_emg is set.
+    if clusters.features_scaled.shape[1] > len(names):
+        names.append("EMG power")
+    return names
+
+
+def plot_cluster_features(clusters, *, stages=None, max_points: int = 20_000,
+                          cmap: str = "RdYlBu_r", columns: int = 3, figsize=None):
+    """The same scatter again, coloured by each of the other features in turn.
+
+    The cluster plot shows two dimensions, but the clustering used more --
+    further components, and the EMG power when ``use_emg`` is set. Two clusters
+    that overlap in the PC1/PC2 view are often cleanly separated by one of those
+    others, and this is where you see which.
+
+    Read it when the clusters look like one smear, or when you cannot tell why
+    the algorithm split where it did: the panel whose colour changes across the
+    boundary is the feature that drew it.
+    """
+    stages = _stages_of(clusters, stages)
+    clusters = _piece(clusters, "clusters")
+
+    names = _feature_names(clusters)
+    keep = _subsample(len(clusters.features_scaled), max_points)
+    points = clusters.features_scaled[keep]
+    labels = clusters.labels[keep]
+    inliers = ~clusters.outlier_mask[keep]
+
+    x, y = points[:, 0], points[:, 1] if points.shape[1] > 1 else np.zeros(len(points))
+    # Every feature except the one already on the x axis.
+    extras = list(range(1, len(names)))
+    panels = 1 + len(extras)
+
+    columns = min(panels, columns)
+    rows = (panels + columns - 1) // columns
+    fig, axes = plt.subplots(rows, columns, squeeze=False,
+                             figsize=figsize or (5.5 * columns, 4.6 * rows))
+    flat = axes.ravel()
+
+    def centroids(ax):
+        for cid in clusters.unique_labels:
+            centre = clusters.centers[int(cid)]
+            ax.scatter(centre[0], centre[1] if len(centre) > 1 else 0.0,
+                       marker="x", s=110, c="k", lw=2, zorder=5)
+
+    plot_clusters(clusters, flat[0], stages=stages, max_points=max_points)
+
+    for panel, column in enumerate(extras, start=1):
+        ax = flat[panel]
+        scatter = ax.scatter(x[inliers], y[inliers], c=points[inliers, column],
+                             s=5, cmap=cmap, rasterized=True)
+        fig.colorbar(scatter, ax=ax, label=names[column])
+        centroids(ax)
+        ax.set_xlabel(names[0])
+        ax.set_ylabel(names[1] if len(names) > 1 else "")
+        ax.set_title(f"coloured by {names[column]}")
+        _despine(ax)
+
+    for ax in flat[panels:]:
+        ax.set_visible(False)
+
+    fig.tight_layout()
+    return fig
+
+
 def plot_psd_per_cluster(pca, ax=None, *, clusters=None, stages=None):
     """Mean spectrum of each cluster, with a 95% interval.
 
@@ -782,6 +854,11 @@ def save_report(result, output_dir: str, dpi: int = 150, panels: bool = True) ->
 
     # And the raw signal as it came in, for the record of what was scored.
     _write("signal_check", lambda: _signal_check_figure(result))
+
+    # The clustering's other dimensions. The summary shows PC1 against PC2, but
+    # the split may have been drawn by a component or by the EMG that view does
+    # not show at all.
+    _write("cluster_features", lambda: plot_cluster_features(result))
 
     if panels:
         individual = {

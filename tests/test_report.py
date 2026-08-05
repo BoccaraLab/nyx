@@ -412,3 +412,59 @@ def test_elliptic_orders_by_id_in_the_table_too(synthetic_recording, params, pie
     )
     assert cluster_order(clusters) == sorted(int(c) for c in clusters.unique_labels)
     assert list(nyx.cluster_ordering(clusters)["cluster"]) == cluster_order(clusters)
+
+
+# ---------------------------------------------------------------------------
+# The dimensions the scatter plot does not show
+# ---------------------------------------------------------------------------
+
+
+def test_cluster_features_draws_one_panel_per_other_feature(pieces):
+    """The clustering used more dimensions than the scatter shows; this is where
+    you see which one actually drew the boundary."""
+    import nyx.report as report
+
+    emg, wake_sleep, pca, *_ = pieces
+    clusters = nyx.cluster_sleep(
+        pca, wake_sleep,
+        clustering={"method": "kmeans", "n_clusters": 2,
+                    "pcs_to_use": [0, 1, 2, 3], "use_emg": True},
+        emg=emg,
+    )
+    figure = report.plot_cluster_features(clusters)
+    visible = [ax for ax in figure.axes if ax.get_visible()]
+
+    # PC1..PC4 + EMG = 5 features; panel 0 is the clusters, then one per
+    # feature other than the x axis, plus a colorbar axis for each of those.
+    titles = [ax.get_title() for ax in visible]
+    assert any("Clusters" in t for t in titles)
+    for name in ("PC2", "PC3", "PC4", "EMG power"):
+        assert any(f"coloured by {name}" == t for t in titles), name
+
+
+def test_cluster_features_without_emg_has_no_emg_panel(pieces):
+    import nyx.report as report
+
+    emg, wake_sleep, pca, *_ = pieces
+    clusters = nyx.cluster_sleep(
+        pca, wake_sleep,
+        clustering={"method": "kmeans", "n_clusters": 2, "pcs_to_use": [0, 1],
+                    "use_emg": False},
+        emg=emg,
+    )
+    titles = [ax.get_title() for ax in report.plot_cluster_features(clusters).axes]
+
+    assert any("coloured by PC2" == t for t in titles)
+    assert not any("EMG" in t for t in titles)
+
+
+def test_cluster_features_takes_a_whole_result_too(scored):
+    import nyx.report as report
+
+    assert report.plot_cluster_features(scored).axes
+
+
+def test_save_report_writes_the_feature_panels(scored, tmp_path):
+    save_report(scored, str(tmp_path))
+
+    assert (tmp_path / "plots" / "cluster_features.png").exists()
