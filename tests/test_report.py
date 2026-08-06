@@ -8,24 +8,11 @@ import pytest
 
 import nyx
 import nyx.report as report
-from nyx.report import (
-    plot_clusters,
-    plot_confusion,
-    plot_emg_threshold,
-    plot_hypnogram_result,
-    plot_pca_components,
-    plot_psd_per_cluster,
-    plot_summary,
-    save_report,
-)
+from nyx.report import plot_confusion, plot_summary, save_report
 
-PANELS = [
-    plot_emg_threshold,
-    plot_pca_components,
-    plot_clusters,
-    plot_psd_per_cluster,
-    plot_hypnogram_result,
-]
+# Read from report rather than listed here, so a panel added to the library is
+# covered by these tests without anyone remembering to add it.
+PANELS = list(nyx.report.AX_PANELS)
 
 
 @pytest.fixture(scope="module")

@@ -61,6 +61,7 @@ __all__ = [
     "plot_confusion",
     "plot_summary",
     "save_report",
+    "AX_PANELS",
 ]
 
 CLUSTER_CMAP = "Set1"
@@ -798,7 +799,10 @@ def plot_confusion(result, ax=None, normalise: bool = True):
 
     ax.set_title(f"MF1 {agreement.mf1:.3f}   acc {agreement.accuracy:.3f}   "
                  f"$\\kappa$ {agreement.kappa:.3f}", fontsize=10)
-    plt.colorbar(image, ax=ax, fraction=0.046, label="% of reference stage")
+    # ax.figure, not plt: pyplot attaches the colorbar to whatever figure is
+    # *current*, which is not this one when the axes was made outside pyplot --
+    # as it is when a panel is drawn straight onto a Qt canvas.
+    ax.figure.colorbar(image, ax=ax, fraction=0.046, label="% of reference stage")
     return _despine(ax, keep=())
 
 
@@ -949,3 +953,19 @@ def save_report(result, output_dir: str, dpi: int = 150, panels: bool = True) ->
                 plt.close(fig)
 
     return plots
+
+
+#: The panels that take ``ax`` as their second positional argument, so they can
+#: all be called as ``draw(piece_or_result, ax)``. Anything hosting a single
+#: panel -- ``save_report``, the tests that pin that contract, the GUI's
+#: canvases -- reads this rather than keeping its own list, so a panel added
+#: here is picked up everywhere at once.
+AX_PANELS = (
+    plot_emg_threshold,
+    plot_emg_power,
+    plot_pca_components,
+    plot_clusters,
+    plot_psd_per_cluster,
+    plot_wake_sleep,
+    plot_hypnogram_result,
+)
