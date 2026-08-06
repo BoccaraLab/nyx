@@ -333,6 +333,37 @@ def test_saving_writes_a_hypnogram_and_a_run_record(scored, tmp_path):
     assert (tmp_path / "run.json").exists()
 
 
+def test_the_saved_record_can_be_loaded_back(scored, tmp_path):
+    scored.save(str(tmp_path), plots=False)
+
+    config = nyx.load_config(str(tmp_path / "run.json"))
+
+    # Without a recording section the record cannot be loaded at all, which
+    # makes it useless as a record of anything.
+    assert config.recording is not None
+    assert config.window == scored.window
+
+
+def test_a_hand_chosen_threshold_survives_into_the_record(
+    session, synthetic_recording, tmp_path
+):
+    session.compute_through(Stage.EMG)
+    session.set_emg_threshold(0.42)
+    session.compute_through(Stage.RESULT)
+    session.save(str(tmp_path), plots=False)
+
+    record = nyx.load_json(str(tmp_path / "run.json"))
+    replayed = nyx.score_recording(
+        synthetic_recording, record["params"],
+        window=tuple(record["window"]), verbose=False,
+    )
+
+    assert replayed.wake_sleep.threshold == pytest.approx(0.42)
+    assert list(replayed.hypnogram["label"]) == list(
+        session.result().hypnogram["label"]
+    )
+
+
 # ---------------------------------------------------------------------------
 # Filters follow the registries
 # ---------------------------------------------------------------------------

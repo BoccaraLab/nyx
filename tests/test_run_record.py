@@ -108,18 +108,60 @@ def test_replaying_a_record_needs_no_interaction(synthetic_recording, params, tm
     nyx.save_results(first, str(out))
     record = json.loads((out / "run.json").read_text())
 
-    # No cluster_overrides: each step's resolved mapping is inside the recorded
-    # params, so replaying needs only the params and the thresholds.
+    # Params and window only -- no threshold dug out of decisions and handed
+    # back in. This is what load_config and Queue.run_all actually do, so it is
+    # what "replays exactly" has to mean.
     second = nyx.score_recording(
         synthetic_recording,
         record["params"],
         window=tuple(record["window"]),
-        emg_threshold=record["decisions"]["emg"]["thresholds"][1],
-        nosignal_threshold=record["decisions"]["emg"]["thresholds"][0],
         verbose=False,
     )
 
     assert second.staging.stage_durations() == first.staging.stage_durations()
+
+
+def test_a_hand_chosen_threshold_replays(synthetic_recording, params, tmp_path):
+    """The case that matters: a threshold nobody would have arrived at.
+
+    Recorded only under ``decisions``, it was never read back, so a record of
+    a hand-tuned run replayed to a *different* scoring -- silently, and only
+    when someone had overridden the automatic threshold, which is exactly when
+    reproducing the run matters.
+    """
+    chosen = 0.42
+    first = nyx.score_recording(
+        synthetic_recording, params, window=(0, 1800),
+        emg_threshold=chosen, verbose=False,
+    )
+    out = tmp_path / "run"
+    nyx.save_results(first, str(out))
+    record = json.loads((out / "run.json").read_text())
+
+    second = nyx.score_recording(
+        synthetic_recording, record["params"],
+        window=tuple(record["window"]), verbose=False,
+    )
+
+    assert second.wake_sleep.threshold == pytest.approx(chosen)
+    assert first.wake_sleep.threshold == pytest.approx(chosen)
+    assert list(second.hypnogram["label"]) == list(first.hypnogram["label"])
+    assert np.allclose(second.hypnogram["time"], first.hypnogram["time"])
+
+
+def test_the_record_says_where_the_threshold_came_from(
+    synthetic_recording, params, tmp_path
+):
+    _result, out = _saved(synthetic_recording, params, tmp_path)
+    record = json.loads((out / "run.json").read_text())
+
+    step = next(
+        s for s in record["params"]["steps"] if s["method"] == "emg_threshold"
+    )
+    # Baked in so it replays, and labelled so a reader can still tell an
+    # automatic threshold from one a person chose.
+    assert step["threshold"] is not None
+    assert step["threshold_source"] in ("auto", "manual")
 
 
 def test_replaying_a_single_step_record_needs_no_interaction(

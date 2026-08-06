@@ -55,7 +55,7 @@ from typing import Any
 
 import numpy as np
 
-from nyx.config import RunConfig, validate_params
+from nyx.config import RecordingSpec, RunConfig, validate_params
 from nyx.pipeline import (
     ScoringResult,
     classify_wake_sleep,
@@ -697,6 +697,22 @@ class ScoringSession:
         config = getattr(self, "_config", None) or RunConfig()
         decisions = dict(config.decisions or {})
 
+        # Without a recording section the record cannot be loaded at all, so a
+        # session that was not started from a config has to describe what it
+        # opened. A demo recording has no path and simply has none.
+        recording_spec = config.recording
+        if recording_spec is None and self._recording is not None:
+            source = self._recording.source_path
+            if source:
+                recording_spec = RecordingSpec(
+                    path=source,
+                    eeg_channel=self._recording.eeg_channel_name,
+                    emg_channel=(
+                        self._recording.emg_channel_name
+                        if self._recording.has_emg else None
+                    ),
+                )
+
         start, end = self.window
         decisions["window"] = [start, end]
         if self._emg is not None and self._wake_sleep is not None:
@@ -707,6 +723,7 @@ class ScoringSession:
 
         return replace(
             config,
+            recording=recording_spec,
             params=self._params,
             window=(start, end),
             decisions=decisions,

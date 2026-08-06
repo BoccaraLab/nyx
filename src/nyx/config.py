@@ -369,6 +369,10 @@ def build_run_record(
     resolved = dict(params or (config.params if config else {}))
     if steps:
         resolved["steps"] = _resolved_steps(resolved.get("steps") or [], steps)
+    if thresholds:
+        resolved["steps"] = _resolved_thresholds(
+            resolved.get("steps") or [], thresholds
+        )
     # Inline, not a path: a record that points at a params file is only as
     # reproducible as that file.
     record["params"] = resolved
@@ -386,6 +390,40 @@ def build_run_record(
     if recording_name:
         record.setdefault("output", {})["name"] = recording_name
     return record
+
+
+def _resolved_thresholds(declared: list, thresholds: dict[str, Any]) -> list:
+    """Write the thresholds a run used into its ``emg_threshold`` step.
+
+    Recording them under ``decisions`` alone is not enough to replay them:
+    ``score_recording`` reads its wake/sleep threshold from the step, and a
+    params file normally leaves it ``null`` so it is fitted automatically. A
+    record that only mentions the threshold in passing therefore replays to a
+    *different scoring* than the one it describes -- silently, and only when
+    the threshold was chosen by hand, which is exactly when it matters.
+
+    ``source`` is kept as written so a reader can still tell an automatic
+    threshold from one someone chose.
+    """
+    values = list(thresholds.get("thresholds") or [])
+    if not values:
+        return list(declared)
+
+    nosignal, threshold = (values + [None, None])[:2] if len(values) > 1 else (
+        0.0, values[0]
+    )
+
+    out = []
+    for spec in declared:
+        if spec.get("method") != "emg_threshold":
+            out.append(spec)
+            continue
+        resolved = dict(spec)
+        resolved["threshold"] = None if threshold is None else float(threshold)
+        resolved["nosignal_threshold"] = float(nosignal or 0.0)
+        resolved["threshold_source"] = thresholds.get("source", "")
+        out.append(resolved)
+    return out
 
 
 def _resolved_steps(declared: list, ran: list) -> list[dict[str, Any]]:
