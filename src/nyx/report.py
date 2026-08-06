@@ -534,7 +534,8 @@ def plot_cluster_features(clusters, *, stages=None, max_points: int = 20_000,
     return fig
 
 
-def plot_psd_per_cluster(pca, ax=None, *, clusters=None, stages=None):
+def plot_psd_per_cluster(pca, ax=None, *, clusters=None, stages=None,
+                         smooth: float = 0.0):
     """Mean spectrum of each cluster, with a 95% interval.
 
     **The panel that decides whether the stage assignment is right**: NREM
@@ -543,7 +544,21 @@ def plot_psd_per_cluster(pca, ax=None, *, clusters=None, stages=None):
 
     Takes either a :class:`~nyx.pipeline.ScoringResult` or the ``pca`` and
     ``clusters`` separately.
+
+    Parameters
+    ----------
+    smooth
+        Gaussian sigma, in frequency bins, applied **for display only** -- the
+        same knob as :func:`plot_pca_grid`. Human recordings are analysed at a
+        fine frequency resolution, and the resulting spectra are noisy enough
+        that the delta-versus-theta comparison this panel exists for is hard to
+        read. Leave at 0 for rodents, whose bins are already wide.
+
+        The confidence interval is smoothed with it, so the band still means
+        what it says relative to the line it surrounds.
     """
+    from scipy.ndimage import gaussian_filter1d
+
     ax = ax or plt.subplots(figsize=(6, 4))[1]
     stages = _stages_of(pca, stages)
     clusters = _extra(pca, "clusters", clusters)
@@ -563,6 +578,10 @@ def plot_psd_per_cluster(pca, ax=None, *, clusters=None, stages=None):
         block = spectra[:, mask]
         mean = block.mean(axis=1)
         ci = 1.96 * block.std(axis=1) / np.sqrt(mask.sum())
+        if smooth:
+            # Both, so the band keeps its meaning relative to the line.
+            mean = gaussian_filter1d(mean, sigma=float(smooth))
+            ci = gaussian_filter1d(ci, sigma=float(smooth))
         colour = _cluster_colour(i)
         ax.plot(pca.freqs, mean, color=colour, lw=1.5,
                 label=f"{_cluster_label(cid, stages)} (n={int(mask.sum())})")
@@ -570,23 +589,29 @@ def plot_psd_per_cluster(pca, ax=None, *, clusters=None, stages=None):
 
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel("Power (dB)")
-    ax.set_title("Mean spectrum per cluster")
+    ax.set_title("Mean spectrum per cluster"
+                 + (f"  (smoothed, sigma {smooth:g})" if smooth else ""))
     _legend(ax, fontsize=8)
     return _despine(ax)
 
 
-def plot_cluster_check(pca, *, clusters=None, stages=None, figsize=(14, 5)):
+def plot_cluster_check(pca, *, clusters=None, stages=None, smooth: float = 0.0,
+                       figsize=(14, 5)):
     """Clusters in PC space beside their mean spectra.
 
     The pair you look at before naming clusters. Read the **right** panel: the
     left one only tells you the clustering separated something, the right one
     tells you what that something is.
+
+    ``smooth`` goes to :func:`plot_psd_per_cluster`; use it on human recordings,
+    where the fine frequency resolution makes the raw spectra hard to read.
     """
     fig, (left, right) = plt.subplots(1, 2, figsize=figsize)
     plot_clusters(_extra(pca, "clusters", clusters) or pca, left,
                   stages=_stages_of(pca, stages))
-    plot_psd_per_cluster(pca, right, clusters=clusters, stages=stages)
-    right.set_title("Mean spectrum per cluster  <- read this one")
+    plot_psd_per_cluster(pca, right, clusters=clusters, stages=stages,
+                         smooth=smooth)
+    right.set_title(right.get_title() + "  <- read this one")
     fig.tight_layout()
     return fig
 
@@ -638,7 +663,9 @@ def plot_hypnogram_result(staging, ax=None, *, title: str = "Hypnogram"):
     return ax
 
 
-def plot_scoring_overview(result, max_points: int = 4000, figsize=None):
+def plot_scoring_overview(result, max_points: int = 4000, figsize=None, *,
+                          eeg_range=None, emg_range=None, palette: str = "jet",
+                          eeg_fmax=None, emg_fmax=None):
     """The signals, their spectrograms and the resulting hypnograms, aligned.
 
     The figure to read a whole recording from. Panels share a time axis, so a
@@ -651,6 +678,26 @@ def plot_scoring_overview(result, max_points: int = 4000, figsize=None):
     The spectrograms are the ones the pipeline computed, not fresh ones -- so
     this shows the features scoring actually used, including any notch filter
     and normalisation. Built with :func:`nyx.plotting.generate_custom_plot`.
+
+    Parameters
+    ----------
+    eeg_range, emg_range
+        Colour limits for the spectrograms, as ``(vmin, vmax)`` in the units of
+        the spectrogram -- dB, normally. Left out, each is set from the data,
+        which is usually right but washes out when a recording carries one very
+        loud band. Read the colorbar on a first draw to see what range to ask
+        for.
+    palette
+        Any matplotlib colormap name.
+    eeg_fmax, emg_fmax
+        Highest frequency to draw. The default shows the whole computed band.
+
+    Examples
+    --------
+    Each knob is per channel, since the two rarely want the same treatment::
+
+        nyx.plot_scoring_overview(result, eeg_range=(-10, 30), eeg_fmax=25,
+                                  palette="viridis")
     """
     import pandas as pd
 
@@ -677,6 +724,18 @@ def plot_scoring_overview(result, max_points: int = 4000, figsize=None):
 
     eeg_times = np.arange(len(recording.eeg_trace())) / recording.fs
 
+    def spectrogram(freqs, times, values, ylabel, im_range, fmax):
+        band = slice(None) if fmax is None else (freqs <= float(fmax))
+        panel = {
+            "type": "spectrogram",
+            "data": [freqs[band], times, values[band]],
+            "label": "power", "ylabel": ylabel, "height": 2,
+            "palette": palette,
+        }
+        if im_range is not None:
+            panel["im_range"] = tuple(im_range)
+        return panel
+
     subplots = []
     if result.emg is not None:
         # EMG first: it is what separates wake from sleep.
@@ -684,16 +743,14 @@ def plot_scoring_overview(result, max_points: int = 4000, figsize=None):
         subplots += [
             {"type": "trace", "data": [emg_times, recording.emg_trace()],
              "label": "EMG", "lw": 0.3, "color": "#333333", "height": 1},
-            {"type": "spectrogram",
-             "data": [result.emg.freqs, result.emg.times, result.emg.spectrogram],
-             "label": "power", "ylabel": "EMG (Hz)", "height": 2},
+            spectrogram(result.emg.freqs, result.emg.times,
+                        result.emg.spectrogram, "EMG (Hz)", emg_range, emg_fmax),
         ]
     subplots += [
         {"type": "trace", "data": [eeg_times, recording.eeg_trace()],
          "label": "EEG", "lw": 0.3, "color": "#333333", "height": 1},
-        {"type": "spectrogram",
-         "data": [result.pca.freqs, result.pca.times, result.pca.spectrogram],
-         "label": "power", "ylabel": "EEG (Hz)", "height": 2},
+        spectrogram(result.pca.freqs, result.pca.times, result.pca.spectrogram,
+                    "EEG (Hz)", eeg_range, eeg_fmax),
     ]
     if reference is not None:
         subplots.append({"type": "hypnogram", "data": pd.DataFrame(reference),

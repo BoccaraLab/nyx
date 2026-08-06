@@ -484,3 +484,89 @@ def test_save_report_writes_the_feature_panels(scored, tmp_path):
     save_report(scored, str(tmp_path))
 
     assert (tmp_path / "plots" / "cluster_features.png").exists()
+
+
+# ---------------------------------------------------------------------------
+# Display knobs: smoothing, and the spectrogram colour range
+# ---------------------------------------------------------------------------
+
+
+def test_psd_smoothing_does_not_change_the_data(pieces):
+    """Display only. A human recording is analysed at a fine frequency
+    resolution and the raw spectra are too noisy to read the delta-versus-theta
+    comparison off, but the numbers behind them must be untouched."""
+    import nyx.report as report
+
+    _emg, _ws, pca, clusters, _staging = pieces
+    before = pca.spectrogram.copy()
+
+    ax = report.plot_psd_per_cluster(pca, clusters=clusters, smooth=5)
+
+    assert np.array_equal(pca.spectrogram, before)
+    assert "smoothed" in ax.get_title()
+
+
+def test_smoothing_reduces_the_wiggle(pieces):
+    import nyx.report as report
+
+    _emg, _ws, pca, clusters, _staging = pieces
+
+    def roughness(ax):
+        line = ax.get_lines()[0].get_ydata()
+        return float(np.abs(np.diff(line)).mean())
+
+    raw = roughness(report.plot_psd_per_cluster(pca, clusters=clusters))
+    smoothed = roughness(report.plot_psd_per_cluster(pca, clusters=clusters, smooth=8))
+
+    assert smoothed < raw
+
+
+def test_cluster_check_passes_smoothing_through(pieces):
+    import nyx.report as report
+
+    _emg, _ws, pca, clusters, _staging = pieces
+    figure = report.plot_cluster_check(pca, clusters=clusters, smooth=5)
+
+    assert any("smoothed" in ax.get_title() for ax in figure.axes)
+
+
+def test_spectrogram_colour_limits_can_be_set(scored):
+    """The default range is set from the data, which washes out when one band is
+    very loud -- so it has to be overridable per channel."""
+    from matplotlib.collections import QuadMesh
+
+    import nyx.report as report
+
+    def limits(figure):
+        return [tuple(round(float(v), 3) for v in mesh.get_clim())
+                for ax in figure.axes for mesh in ax.collections
+                if isinstance(mesh, QuadMesh)]
+
+    automatic = limits(report.plot_scoring_overview(scored))
+    explicit = limits(report.plot_scoring_overview(
+        scored, eeg_range=(-5, 25), emg_range=(0, 10)))
+
+    assert automatic != explicit
+    assert (0.0, 10.0) in explicit and (-5.0, 25.0) in explicit
+
+
+def test_spectrograms_can_be_capped_in_frequency(scored):
+    import nyx.report as report
+
+    figure = report.plot_scoring_overview(scored, eeg_fmax=12)
+    tops = [ax.get_ylim()[1] for ax in figure.axes
+            if ax.get_ylabel().startswith("EEG (")]
+
+    assert tops and max(tops) <= 13
+
+
+def test_palette_is_configurable(scored):
+    from matplotlib.collections import QuadMesh
+
+    import nyx.report as report
+
+    figure = report.plot_scoring_overview(scored, palette="viridis")
+    meshes = [m for ax in figure.axes for m in ax.collections
+              if isinstance(m, QuadMesh)]
+
+    assert meshes and all(m.get_cmap().name == "viridis" for m in meshes)

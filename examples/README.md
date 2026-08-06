@@ -35,10 +35,10 @@ jupyter lab
 The synthetic signal in notebooks 01–02 is built to contain exactly the
 structure nyx looks for, so it scores near-perfectly. That makes it good for
 learning the mechanics and for checking an installation, and **useless as a
-measure of how well nyx works**. Notebook 05 is the honest one: a real recording,
+measure of how well nyx works**. Notebook 03 is the honest one: a real recording,
 a real reference, and defaults that will need adjusting.
 
 ## Where the data goes
 
-Notebook 05 downloads into `examples/data/`, which is git-ignored. Delete it when
+Notebook 03 downloads into `examples/data/`, which is git-ignored. Delete it when
 you are done; nothing else depends on it.
