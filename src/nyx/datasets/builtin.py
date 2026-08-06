@@ -94,7 +94,7 @@ def _oxford_mouse(cfg: dict) -> DatasetSpec:
         ),
         annotation_format="visbrain_hyp",
         params="params/mouse.json",
-        source="https://doi.org/10.5281/zenodo.6035101",
+        source="https://doi.org/10.5281/zenodo.10200482",
     )
 
 
@@ -200,7 +200,7 @@ def _ellen_dash(cfg: dict) -> DatasetSpec:
 
 
 # ---------------------------------------------------------------------------
-# SIESTA (human)
+# SIESTA
 # ---------------------------------------------------------------------------
 
 
@@ -221,7 +221,8 @@ def _siesta_dli(cfg: dict) -> DatasetSpec:
             "epoch_length": 10.0,
             "label_map": {1: "WAKE", 2: "NREM", 3: "REM", 255: "UNDEFINED"},
         },
-        params="params/human.json",
+        params="params/mouse.json",
+        source="https://doi.org/10.5281/zenodo.15322394",
     )
 
 
@@ -229,10 +230,6 @@ def _siesta_dli(cfg: dict) -> DatasetSpec:
 # Boccara lab (DSI telemetry)
 # ---------------------------------------------------------------------------
 
-
-# Registered under both names: the old code had a `boccara_lab` entry with the
-# same readers but no path builder, so it could never load. All Boccara lab
-# recordings share this layout.
 @_register("boccara_lab")
 @_register("boccaralab_dsi")
 def _boccaralab_dsi(cfg: dict) -> DatasetSpec:
@@ -252,7 +249,7 @@ def _boccaralab_dsi(cfg: dict) -> DatasetSpec:
 
 
 # ---------------------------------------------------------------------------
-# Dreem Open Datasets (human PSG)
+# Dreem Open Datasets
 # ---------------------------------------------------------------------------
 
 #: Stage coding used by the Dreem Open Datasets' .npy annotations.
@@ -289,7 +286,9 @@ def _dreem(cfg: dict) -> DatasetSpec:
         annotation_format="epoch_npy",
         annotation_kwargs={"epoch_length": 30.0, "label_map": DREEM_STAGES},
         params="params/human.json",
-        source="https://github.com/Dreem-Organization/dreem-learning-open",
+        # The repository's own download script fetches from an S3 bucket that no
+        # longer exists (Dreem folded); this Zenodo record is the live mirror.
+        source="https://doi.org/10.5281/zenodo.15900394",
     )
 
 
@@ -379,7 +378,7 @@ def _ccshs(cfg: dict) -> DatasetSpec:
 
 
 # ---------------------------------------------------------------------------
-# ANPHY sleep (human)
+# ANPHY
 # ---------------------------------------------------------------------------
 
 
