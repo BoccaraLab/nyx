@@ -33,11 +33,15 @@ pytestmark = pytest.mark.gui
 
 
 @pytest.fixture
-def session(synthetic_recording, params):
+def session(synthetic, synthetic_recording, params):
     from nyx.gui.session import ScoringSession
 
+    _eeg, _emg, _fs, truth = synthetic
+
     s = ScoringSession(params)
-    s.set_recording(synthetic_recording)
+    # With the reference, so the agreement and confusion paths are exercised
+    # too -- they are the ones most likely to break silently.
+    s.set_recording(synthetic_recording, reference=truth)
     s.set_window((0.0, 2400.0))
     return s
 
