@@ -23,8 +23,12 @@ from nyx.types import Recording
 
 __all__ = [
     "read_recording",
+    "list_channels",
     "register_recording_reader",
+    "register_channel_lister",
     "RECORDING_READERS",
+    "RECORDING_EXTENSIONS",
+    "CHANNEL_LISTERS",
     "ChannelSpec",
 ]
 
@@ -34,11 +38,19 @@ ChannelSpec = int | str
 
 RECORDING_READERS: dict[str, Callable[..., tuple]] = {}
 
-_EXTENSION_TO_FORMAT = {
+#: File extension -> format name, used by ``format="auto"``. A folder is always
+#: read as spikeinterface. Anything that builds a file dialog should read this
+#: rather than hardcoding the list.
+RECORDING_EXTENSIONS = {
     ".edf": "edf",
     ".bdf": "edf",
     ".npz": "npz",
 }
+
+#: Format name -> a function returning the channel names in a file, so a
+#: channel can be chosen before anything is loaded. Optional: a format with no
+#: lister simply cannot be browsed.
+CHANNEL_LISTERS: dict[str, Callable[..., list[str]]] = {}
 
 
 def register_recording_reader(name: str) -> Callable:
@@ -46,6 +58,21 @@ def register_recording_reader(name: str) -> Callable:
 
     def decorator(func: Callable[..., tuple]) -> Callable[..., tuple]:
         RECORDING_READERS[name] = func
+        return func
+
+    return decorator
+
+
+def register_channel_lister(name: str) -> Callable:
+    """Register a channel lister for the format ``name``.
+
+    ``lister(path, **kwargs) -> list[str]``. Registering one is what lets a
+    caller offer the file's channels to pick from instead of asking for an
+    index typed blind.
+    """
+
+    def decorator(func: Callable[..., list[str]]) -> Callable[..., list[str]]:
+        CHANNEL_LISTERS[name] = func
         return func
 
     return decorator
@@ -332,12 +359,97 @@ def read_recording(
     )
 
 
+# ---------------------------------------------------------------------------
+# Listing channels
+# ---------------------------------------------------------------------------
+
+
+@register_channel_lister("edf")
+def _list_edf_channels(path: str, **kwargs) -> list[str]:
+    """Channel names in an EDF/BDF, via the same fallback chain as the reader.
+
+    Nothing here loads sample data -- MNE is asked for ``preload=False``, which
+    is the difference between reading a header and reading a night.
+    """
+    errors: list[str] = []
+    stream_id = str(kwargs.get("stream_id", "0"))
+
+    try:
+        import spikeinterface.extractors as se
+
+        return [str(c) for c in se.read_edf(path, stream_id=stream_id).get_channel_ids()]
+    except Exception as exc:  # noqa: BLE001 - try the next reader
+        errors.append(f"spikeinterface: {exc}")
+
+    try:
+        import pyedflib
+
+        reader = pyedflib.EdfReader(path)
+        try:
+            return [reader.getLabel(i) for i in range(reader.signals_in_file)]
+        finally:
+            reader.close()
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"pyedflib: {exc}")
+
+    try:
+        import mne
+
+        return list(mne.io.read_raw_edf(path, preload=False, verbose=False).ch_names)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"mne: {exc}")
+
+    raise OSError(
+        f"Could not read the channel names of {path!r}.\n  " + "\n  ".join(errors)
+    )
+
+
+@register_channel_lister("spikeinterface")
+def _list_spikeinterface_channels(path: str, **kwargs) -> list[str]:
+    import spikeinterface as si
+
+    return [str(c) for c in si.load(path).get_channel_ids()]
+
+
+@register_channel_lister("npz")
+def _list_npz_channels(path: str, **kwargs) -> list[str]:
+    """The arrays an npz archive actually carries, of the ones nyx reads."""
+    with np.load(path) as data:
+        return [key for key in ("eeg", "emg") if key in data]
+
+
+def list_channels(path: str, format: str = "auto", **kwargs) -> list[str]:
+    """Channel names in a recording file, without loading it.
+
+    For choosing ``eeg_channel`` and ``emg_channel`` before calling
+    :func:`read_recording` -- which needs them up front, and so cannot tell you
+    what there is to choose from.
+
+    Raises ``LookupError`` for a format with no registered lister; register one
+    with :func:`register_channel_lister`.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Recording not found: {path}")
+
+    if format == "auto":
+        format = _infer_format(path)
+
+    lister = CHANNEL_LISTERS.get(format)
+    if lister is None:
+        raise LookupError(
+            f"No channel lister for format {format!r}. Available: "
+            f"{sorted(CHANNEL_LISTERS)}. Register one with "
+            f"nyx.io.register_channel_lister."
+        )
+    return [str(name) for name in lister(path, **kwargs)]
+
+
 def _infer_format(path: str) -> str:
     if os.path.isdir(path):
         return "spikeinterface"
     ext = os.path.splitext(path)[1].lower()
-    if ext in _EXTENSION_TO_FORMAT:
-        return _EXTENSION_TO_FORMAT[ext]
+    if ext in RECORDING_EXTENSIONS:
+        return RECORDING_EXTENSIONS[ext]
     raise ValueError(
         f"Cannot infer the format of {path!r} from its extension ({ext!r}). "
         f"Pass format= explicitly, one of: {sorted(RECORDING_READERS)}."

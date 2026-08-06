@@ -80,6 +80,19 @@ COLORS: dict[str, str] = {
     "SLEEP": "#402864",
 }
 
+#: Stage display order, shallowest first. The two "not scored" labels sit above
+#: WAKE, so the rows run from "no stage" down through progressively deeper
+#: sleep. NOSIGNAL is no usable signal; UNCLASSIFIED is signal a scorer declined
+#: to name. TR sits with the light NREM stages, above NREM2, being the
+#: shallowest of the three the rodent substage recipe separates.
+#:
+#: This is stage vocabulary rather than plot layout: hypnogram rows, epoch
+#: encoder buttons and stage tables all want the same order.
+STAGE_ROW_ORDER = (
+    "NOSIGNAL", "UNCLASSIFIED", "WAKE", "REM", "NREM1", "NREM", "TR",
+    "NREM2", "NREM3",
+)
+
 # Backwards-compatible aliases for the old lowercase names.
 state_names = STATE_NAMES
 colors_dict = COLORS

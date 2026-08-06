@@ -139,7 +139,7 @@ def test_saving_skips_the_emg_power_file(no_emg, tmp_path):
 
 
 def test_the_shipped_no_emg_params_load():
-    params = nyx.load_params("params/mouse_no_emg.json")
+    params = nyx.load_params("mouse_no_emg")
 
     assert not any(s["method"] == "emg_threshold" for s in params["steps"])
     assert not any(s.get("use_emg") for s in params["steps"])

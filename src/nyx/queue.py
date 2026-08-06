@@ -7,7 +7,7 @@ things.
 
 **Headless.** Score everything with the parameters as written, no interaction::
 
-    queue = nyx.open_queue("recordings.csv", params="params/mouse.json")
+    queue = nyx.open_queue("recordings.csv", params="mouse")
     queue.run_all()
 
 This is how you *reproduce* a result: point it at a folder of ``run.json``
@@ -18,7 +18,7 @@ unseen recordings are a starting point, not an answer.
 **Interactive.** Work through the list in a notebook or a GUI, one recording at
 a time::
 
-    for config in nyx.open_queue("recordings.csv", params="params/mouse.json"):
+    for config in nyx.open_queue("recordings.csv", params="mouse"):
         ...                    # score this one however you like
         queue.done()           # or queue.skip("EMG disconnected")
 
@@ -50,6 +50,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -277,6 +278,7 @@ class Queue:
         skip_scored: bool = True,
         stop_on_error: bool = False,
         verbose: bool = True,
+        on_progress: Callable[[dict[str, Any]], None] | None = None,
         **score_kwargs,
     ) -> list[dict[str, Any]]:
         """Score every pending recording with no interaction.
@@ -296,6 +298,10 @@ class Queue:
             recorded as ``failed`` with its error and the batch carries on --
             one unreadable file should not cost you the other forty. Turn this
             on to get the traceback when you want to fix one.
+        on_progress
+            Called after each recording with its row plus ``index`` and
+            ``total``. For a progress bar that is not stdout -- without it a
+            caller wanting one has to reimplement this loop.
 
         Returns
         -------
@@ -344,6 +350,8 @@ class Queue:
                     raise
 
             rows.append(row)
+            if on_progress is not None:
+                on_progress({**row, "index": i, "total": len(targets)})
 
         return rows
 
@@ -401,7 +409,7 @@ def open_queue(
     --------
     Interactive, one recording at a time::
 
-        queue = nyx.open_queue("recordings.csv", params="params/mouse.json")
+        queue = nyx.open_queue("recordings.csv", params="mouse")
         queue.print_status()
 
         config = queue.next()          # writes config.json

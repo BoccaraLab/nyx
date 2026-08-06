@@ -347,7 +347,7 @@ def cluster_sleep(
                 "This step sets use_emg, but the recording has no EMG channel "
                 "(or none was passed). Set use_emg false on every step, or give "
                 "the recording an EMG -- nyx.emg_from_lfp builds a surrogate "
-                "from wideband channels. See params/mouse_no_emg.json."
+                "from wideband channels. See nyx.load_params('mouse_no_emg')."
             )
         emg_aligned = _emg_aligned_to_sleep_epochs(emg, wake_sleep, pca.fs)
         n = min(len(features), len(emg_aligned))

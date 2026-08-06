@@ -18,7 +18,7 @@
         }
     },
 
-    "params": "params/mouse.json",
+    "params": "mouse",
 
     "_window_comment": "Analysis window in seconds. Delete to score the whole recording. Run nyx.check_signals(recording) first to see where usable signal starts and ends.",
     "window": [0, 86400],

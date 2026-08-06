@@ -291,3 +291,67 @@ def test_rules_land_in_the_run_record(synthetic_recording, tmp_path):
 
     record = nyx.load_json(str(tmp_path / "run.json"))
     assert record["params"]["postprocess"] == rules
+
+
+# ---------------------------------------------------------------------------
+# flag_rules -- asking rather than telling
+# ---------------------------------------------------------------------------
+
+
+def test_a_rule_flags_exactly_what_it_would_rewrite():
+    hypnogram = hyp(("WAKE", 60), ("REM", 10), ("WAKE", 60), ("NREM", 60))
+
+    flags = nyx.flag_rules(hypnogram, ["rem_flanked_by_wake"])
+
+    assert list(flags["rem_flanked_by_wake"]) == [False, True, False, False]
+
+
+def test_flagging_changes_nothing():
+    hypnogram = hyp(("WAKE", 60), ("REM", 10), ("WAKE", 60))
+    before = as_bouts(hypnogram)
+
+    nyx.flag_rules(hypnogram, [{"min_duration": {"seconds": 30}}])
+
+    assert as_bouts(hypnogram) == before
+
+
+def test_every_rule_gets_its_own_mask():
+    hypnogram = hyp(("WAKE", 60), ("REM", 2), ("NREM", 60))
+
+    flags = nyx.flag_rules(
+        hypnogram,
+        ["rem_after_wake", {"min_duration": {"seconds": 4}}],
+    )
+
+    assert set(flags) == {"rem_after_wake", "min_duration"}
+    # Both rules independently object to the same 2 s REM after wake, which is
+    # the point of evaluating them separately: apply_rules would let the first
+    # rewrite it and the second see nothing left to complain about.
+    assert flags["rem_after_wake"][1]
+    assert flags["min_duration"][1]
+
+
+def test_flagging_agrees_with_applying_that_rule_alone():
+    hypnogram = hyp(("WAKE", 60), ("REM", 2), ("NREM", 8), ("WAKE", 30),
+                    ("REM", 40), ("NREM", 120), ("REM", 3))
+    rule = {"min_duration": {"seconds": 4}}
+
+    flagged = nyx.flag_rules(hypnogram, [rule])["min_duration"]
+    applied = apply_rules(hypnogram, [rule])
+
+    midpoints = hypnogram["time"] + hypnogram["duration"] / 2
+    for index, midpoint in enumerate(midpoints):
+        inside = (applied["time"] <= midpoint) & (
+            midpoint < applied["time"] + applied["duration"]
+        )
+        after = str(applied["label"][inside][0])
+        assert flagged[index] == (after != str(hypnogram["label"][index]))
+
+
+def test_no_rules_flags_nothing():
+    assert nyx.flag_rules(hyp(("WAKE", 60), ("REM", 1)), []) == {}
+
+
+def test_an_unknown_rule_is_reported_the_same_way_as_when_applying():
+    with pytest.raises(ValueError, match="Unknown postprocessing rule"):
+        nyx.flag_rules(hyp(("WAKE", 60)), ["not_a_rule"])

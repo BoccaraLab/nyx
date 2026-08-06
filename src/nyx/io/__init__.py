@@ -6,15 +6,23 @@ from nyx.io.annotations import (
     register_annotation_reader,
 )
 from nyx.io.recordings import (
+    CHANNEL_LISTERS,
+    RECORDING_EXTENSIONS,
     RECORDING_READERS,
+    list_channels,
     read_recording,
+    register_channel_lister,
     register_recording_reader,
 )
 
 __all__ = [
     "read_recording",
+    "list_channels",
     "register_recording_reader",
+    "register_channel_lister",
     "RECORDING_READERS",
+    "RECORDING_EXTENSIONS",
+    "CHANNEL_LISTERS",
     "read_annotations",
     "register_annotation_reader",
     "ANNOTATION_READERS",

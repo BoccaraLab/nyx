@@ -79,7 +79,7 @@ import nyx
 recording = nyx.read_recording("mouse01.edf", eeg_channel=0, emg_channel=1)
 print(recording.describe())         # check you picked the right channels
 
-params = nyx.load_params("params/mouse.json")
+params = nyx.load_params("mouse")
 result = nyx.score_recording(recording, params)
 nyx.save_results(result, "results/mouse01")
 ```
@@ -178,7 +178,7 @@ result = nyx.score_recording(recording, params, emg=emg)
 Muscle is volume-conducted, so it appears on every electrode at once while
 brain activity stays local. Band-passing 275–600 Hz and measuring how much the
 channels agree recovers a usable tone signal. Failing that,
-`emg_channel=None` with `params/mouse_no_emg.json` scores from the EEG alone —
+`emg_channel=None` with `mouse_no_emg` params scores from the EEG alone —
 nyx will warn, and you should check the per-cluster spectra every time.
 
 ### Many recordings
@@ -194,7 +194,7 @@ data/m02.edf,,0,1
 Open it as a **queue**, which remembers where you got to:
 
 ```python
-queue = nyx.open_queue("recordings.csv", params="params/mouse.json")
+queue = nyx.open_queue("recordings.csv", params="mouse")
 queue.print_status()
 ```
 
@@ -258,7 +258,7 @@ Boccara lab, Dreem Open Datasets (dodh/dodo), MESA, CHAT, CCSHS, ANPHY-Sleep.
 
 A parameter file describes **how to score**, not which recording. It carries the
 spectral settings and the sequence of clustering steps, and no paths or
-thresholds — so it is shareable. See [`params/README.md`](params/README.md).
+thresholds — so it is shareable. See [`src/nyx/params/README.md`](src/nyx/params/README.md).
 
 ```jsonc
 "steps": [
@@ -281,7 +281,7 @@ An optional `postprocess` list rewrites implausible *sequences* after the
 scoring — REM straight out of wake, segments too short to be a real bout. It is
 off by default: those rules barely move agreement but they do move the biology,
 so which one to use depends on what your analysis measures. See
-[`nyx/postprocess.py`](src/nyx/postprocess.py) and `params/README.md`.
+[`nyx/postprocess.py`](src/nyx/postprocess.py) and `src/nyx/params/README.md`.
 
 ## Reproducibility
 

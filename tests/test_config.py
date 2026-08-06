@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+import nyx
 from nyx.config import RunConfig, load_config, load_params, validate_params
 from nyx.manifest import load_manifest, write_manifest
 from nyx.steps import Step, steps_from_params
@@ -315,3 +316,61 @@ def test_written_manifest_reloads(tmp_path):
 
     assert config.recording.eeg_channel == "C3"
     assert config.window == (0.0, 1000.0)
+
+
+# ---------------------------------------------------------------------------
+# Built-in parameter presets
+# ---------------------------------------------------------------------------
+
+
+def test_every_shipped_preset_is_listed_and_loads():
+    presets = nyx.available_params()
+
+    assert "mouse" in presets and "human" in presets
+    for name in presets:
+        assert nyx.load_params(name)["EEG"]
+
+
+def test_a_preset_loads_from_anywhere(tmp_path, monkeypatch):
+    # The presets ship inside the package, so they must not depend on the
+    # working directory the way "params/mouse.json" used to.
+    monkeypatch.chdir(tmp_path)
+
+    assert nyx.load_params("mouse")["EEG"]
+
+
+def test_a_file_in_the_working_directory_wins_over_a_preset(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write(tmp_path, "mouse.json", {**MINIMAL_PARAMS, "mine": True})
+
+    assert nyx.load_params("mouse.json").get("mine") is True
+
+
+def test_the_old_repo_root_path_still_works_but_warns():
+    with pytest.warns(FutureWarning, match="built-in preset"):
+        params = nyx.load_params("params/mouse.json")
+
+    assert params["EEG"]
+
+
+def test_a_name_that_is_neither_a_file_nor_a_preset_says_both():
+    with pytest.raises(FileNotFoundError) as error:
+        nyx.load_params("gerbil")
+
+    assert "built-in presets" in str(error.value)
+    assert "mouse" in str(error.value)
+
+
+def test_a_config_can_name_a_preset_instead_of_a_path(tmp_path):
+    path = _write(tmp_path, "config.json", {
+        "recording": {"path": "rec.npz"},
+        "params": "mouse",
+    })
+
+    config = nyx.load_config(str(path))
+
+    assert config.params_path == "mouse"
+    assert config.params["EEG"]
+    # to_dict has to round-trip the name, not an absolute path, or the config
+    # stops being portable the moment it is written back out.
+    assert config.to_dict()["params"] == "mouse"

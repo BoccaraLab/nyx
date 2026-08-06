@@ -93,7 +93,7 @@ def _oxford_mouse(cfg: dict) -> DatasetSpec:
             base, "annotations", _oxford_annotation_filename(sub_dataset, recording_name)
         ),
         annotation_format="visbrain_hyp",
-        params="params/mouse.json",
+        params="mouse",
         source="https://doi.org/10.5281/zenodo.10200482",
     )
 
@@ -136,7 +136,7 @@ def _sippel_morris(cfg: dict) -> DatasetSpec:
         annotation_path=annotation_path,
         annotation_format="epoch_csv",
         annotation_kwargs=_sippel_annotation_kwargs(annotation_path),
-        params="params/rat.json",
+        params="rat",
     )
 
 
@@ -195,7 +195,7 @@ def _ellen_dash(cfg: dict) -> DatasetSpec:
             "header": 1,
             "index_col": 0,
         },
-        params="params/rat.json",
+        params="rat",
     )
 
 
@@ -221,7 +221,7 @@ def _siesta_dli(cfg: dict) -> DatasetSpec:
             "epoch_length": 10.0,
             "label_map": {1: "WAKE", 2: "NREM", 3: "REM", 255: "UNDEFINED"},
         },
-        params="params/mouse.json",
+        params="mouse",
         source="https://doi.org/10.5281/zenodo.15322394",
     )
 
@@ -244,7 +244,7 @@ def _boccaralab_dsi(cfg: dict) -> DatasetSpec:
         emg_channel=cfg.get("emg_channel", 1),
         annotation_path=os.path.join(base, "annotations", f"{recording_name}.csv"),
         annotation_format="interval_csv",
-        params="params/mouse.json",
+        params="mouse",
     )
 
 
@@ -285,7 +285,7 @@ def _dreem(cfg: dict) -> DatasetSpec:
         annotation_path=os.path.join(base, "annotations", f"{recording_name}.npy"),
         annotation_format="epoch_npy",
         annotation_kwargs={"epoch_length": 30.0, "label_map": DREEM_STAGES},
-        params="params/human.json",
+        params="human",
         # The repository's own download script fetches from an S3 bucket that no
         # longer exists (Dreem folded); this Zenodo record is the live mirror.
         source="https://doi.org/10.5281/zenodo.15900394",
@@ -324,7 +324,7 @@ def _mesa(cfg: dict) -> DatasetSpec:
         emg_channel=cfg.get("emg_channel", "EMG"),
         annotation_path=annotation,
         annotation_format="nsrr_xml",
-        params="params/human.json",
+        params="human",
         source="https://sleepdata.org/datasets/mesa",
     )
 
@@ -348,7 +348,7 @@ def _chat(cfg: dict) -> DatasetSpec:
         emg_channel=cfg.get("emg_channel", ["Lchin", "LChin"]),
         annotation_path=annotation,
         annotation_format="nsrr_xml",
-        params="params/human.json",
+        params="human",
         source="https://sleepdata.org/datasets/chat",
     )
 
@@ -372,7 +372,7 @@ def _ccshs(cfg: dict) -> DatasetSpec:
         recording_kwargs={"stream_id": "0", "emg_stream_id": "1"},
         annotation_path=annotation,
         annotation_format="nsrr_xml",
-        params="params/human.json",
+        params="human",
         source="https://sleepdata.org/datasets/ccshs",
     )
 
@@ -402,7 +402,7 @@ def _anphy(cfg: dict) -> DatasetSpec:
             "sep": "\t",
             "header": None,
         },
-        params="params/human.json",
+        params="human",
         source="https://doi.org/10.6084/m9.figshare.c.7016359",
     )
 
@@ -439,7 +439,7 @@ def _gulledge_2025(cfg: dict) -> DatasetSpec:
             "time_format": "clock",
             "label_map": {3: "NREM", 4: "REM", 5: "WAKE"},
         },
-        params="params/mouse.json",
+        params="mouse",
     )
 
 

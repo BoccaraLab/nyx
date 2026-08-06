@@ -98,8 +98,8 @@ def load_manifest(
     # directory, so resolve them there before the manifest's rule can claim
     # them -- otherwise `output_root="results"` lands inside the manifest's
     # folder rather than beside the notebook that asked for it.
-    if params:
-        params = os.path.abspath(params)
+    if params and (os.sep in params or "/" in params or params.endswith(".json")):
+        params = os.path.abspath(params)  # a path; a bare preset name is left alone
     output_root = os.path.abspath(output_root)
 
     configs: list[RunConfig] = []

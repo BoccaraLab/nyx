@@ -25,8 +25,10 @@ live next to the data it points at.
 
 from __future__ import annotations
 
+import importlib.resources
 import json
 import os
+import warnings
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,6 +40,8 @@ __all__ = [
     "load_config",
     "load_json",
     "load_params",
+    "available_params",
+    "params_path",
     "validate_params",
     "build_run_record",
 ]
@@ -194,13 +198,18 @@ class RunConfig:
                 "'dataset' name. Available datasets: see nyx.datasets.list_datasets()."
             )
 
-        params_path = spec.pop("params", None)
-        params = {}
-        if isinstance(params_path, dict):
-            params, params_path = params_path, None  # params given inline
-        elif params_path:
-            params_path = _resolve(params_path, base)
-            params = load_json(params_path)
+        declared = spec.pop("params", None)
+        params: dict[str, Any] = {}
+        params_source = None
+        if isinstance(declared, dict):
+            params = declared  # params given inline
+        elif declared:
+            # A path is resolved against the config file, as every other path
+            # here is. A preset name is not a path, so it is left alone and
+            # load_params finds it inside the package.
+            candidate = _resolve(declared, base)
+            params_source = candidate if os.path.exists(candidate) else declared
+            params = load_params(params_source)
 
         window = spec.pop("window", None)
         if window is not None:
@@ -221,7 +230,7 @@ class RunConfig:
             ),
             dataset=dataset,
             dataset_options=dataset_options,
-            params_path=params_path,
+            params_path=params_source,
             params=params,
             output=OutputSpec.from_dict(spec.pop("output", {}), base),
             window=window,
@@ -414,10 +423,76 @@ def _step_dict(step) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def load_params(path: str) -> dict[str, Any]:
-    """Read a parameter file and check it has the sections the pipeline needs."""
+#: Directory holding the parameter presets that ship with nyx.
+PARAMS_DIR = str(importlib.resources.files("nyx") / "params")
+
+
+def available_params() -> list[str]:
+    """Names of the parameter presets that ship with nyx.
+
+    ``['human', 'mouse', 'mouse_no_emg', ...]`` -- any of which can be passed
+    straight to :func:`load_params`.
+    """
+    if not os.path.isdir(PARAMS_DIR):  # pragma: no cover - a broken install
+        return []
+    return sorted(
+        os.path.splitext(name)[0]
+        for name in os.listdir(PARAMS_DIR)
+        if name.endswith(".json")
+    )
+
+
+def params_path(name: str) -> str:
+    """Resolve a preset name *or* a path to a parameter file.
+
+    ``load_params("mouse")`` and ``load_params("my_params.json")`` both work.
+    Tried in order:
+
+    1. ``name`` as a path, as typed -- so a file in the working directory
+       always wins over a preset of the same name;
+    2. ``name`` as a preset, e.g. ``"mouse"``;
+    3. ``name`` with ``.json`` stripped, as a preset, e.g. ``"mouse.json"``;
+    4. the *stem* of a path that does not exist, as a preset. This is the
+       compatibility case: params used to live at the repo root, so configs
+       written before the move say ``"params/mouse.json"``. It warns rather
+       than failing, and will be removed.
+    """
+    if os.path.exists(name):
+        return name
+
+    stem = os.path.splitext(os.path.basename(name))[0]
+    presets = available_params()
+
+    if name in presets:
+        return os.path.join(PARAMS_DIR, name + ".json")
+    if os.sep not in name and "/" not in name and stem in presets:
+        return os.path.join(PARAMS_DIR, stem + ".json")
+    if stem in presets:
+        resolved = os.path.join(PARAMS_DIR, stem + ".json")
+        warnings.warn(
+            f"{name!r} does not exist; using the built-in preset {stem!r} instead. "
+            f"Parameter files now ship inside the package, so write "
+            f"load_params({stem!r}). This fallback will be removed.",
+            FutureWarning,
+            stacklevel=3,
+        )
+        return resolved
+
+    raise FileNotFoundError(
+        f"No parameter file at {name!r} (looked in {os.getcwd()}), and it is not "
+        f"one of the built-in presets: {presets}."
+    )
+
+
+def load_params(name: str) -> dict[str, Any]:
+    """Read a parameter file and check it has the sections the pipeline needs.
+
+    ``name`` is either a path or the name of one of the presets nyx ships --
+    see :func:`available_params`.
+    """
+    path = params_path(name)
     params = load_json(path)
-    validate_params(params, source=path)
+    validate_params(params, source=name)
     return params
 
 

@@ -107,7 +107,7 @@ class Recording:
                 f"surrogate with nyx.emg_from_lfp. To score without any EMG at all, "
                 f"use a params file whose steps do not include an 'emg_threshold' "
                 f"step and whose clustering has use_emg false -- see "
-                f"params/mouse_no_emg.json."
+                f"nyx.load_params('mouse_no_emg')."
             )
         return self.emg.get_traces(return_in_uV=return_in_uV)[:, 0]
 

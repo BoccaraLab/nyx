@@ -11,7 +11,7 @@ Quick start::
     recording = nyx.read_recording("mouse01.edf", eeg_channel=0, emg_channel=1)
     print(recording.describe())          # check you picked the right channels
 
-    params = nyx.load_params("params/mice.json")
+    params = nyx.load_params("mouse")     # or a path to your own JSON
     result = nyx.score_recording(recording, params)
 
     nyx.save_results(result, "results/mouse01")
@@ -29,7 +29,14 @@ To stop partway and adjust something, call the steps yourself -- see
 
 __version__ = "0.1.0"
 
-from nyx.config import RunConfig, load_config, load_json, load_params
+from nyx.config import (
+    RunConfig,
+    available_params,
+    load_config,
+    load_json,
+    load_params,
+    params_path,
+)
 from nyx.demo import (
     demo_messy_recording,
     demo_params,
@@ -53,7 +60,7 @@ from nyx.pipeline import (
     save_results,
     score_recording,
 )
-from nyx.postprocess import apply_rules
+from nyx.postprocess import apply_rules, flag_rules
 from nyx.preprocessing import preprocess_recording
 from nyx.queue import Queue, open_queue
 from nyx.report import (
@@ -87,6 +94,8 @@ __all__ = [
     "read_recording",
     "read_annotations",
     "load_params",
+    "available_params",
+    "params_path",
     "load_json",
     # configuration
     "load_config",
@@ -126,6 +135,7 @@ __all__ = [
     "SignalCheck",
     "preprocess_recording",
     "apply_rules",
+    "flag_rules",
     # pipeline steps
     "emg_from_lfp",
     "compute_emg_features",

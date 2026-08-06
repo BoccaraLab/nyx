@@ -87,6 +87,7 @@ from nyx.io.annotations import merge_consecutive
 __all__ = [
     "RULES",
     "apply_rules",
+    "flag_rules",
     "rules_from_params",
     "rem_flanked_by_wake",
     "rem_after_wake",
@@ -298,19 +299,72 @@ def apply_rules(hypnogram: dict, rules, verbose: bool = False) -> dict[str, np.n
 
     for rule in rules:
         name, kwargs = _as_call(rule)
-        function = RULES.get(name)
-        if function is None:
-            raise ValueError(
-                f"Unknown postprocessing rule {name!r}. Available: "
-                f"{sorted(RULES)}. Register your own by adding it to "
-                f"nyx.postprocess.RULES."
-            )
+        function = _rule_function(name)
         before = _stage_seconds(hypnogram)
         hypnogram = function(hypnogram, **kwargs)
         if verbose:
             print(f"  {name}: {_changes(before, _stage_seconds(hypnogram))}")
 
     return hypnogram
+
+
+def _rule_function(name: str):
+    function = RULES.get(name)
+    if function is None:
+        raise ValueError(
+            f"Unknown postprocessing rule {name!r}. Available: "
+            f"{sorted(RULES)}. Register your own by adding it to "
+            f"nyx.postprocess.RULES."
+        )
+    return function
+
+
+def _label_at(hypnogram: dict, times: np.ndarray) -> np.ndarray:
+    """The label each of ``times`` falls in, or ``""`` where nothing covers it."""
+    starts, durations, labels = _parts(hypnogram)
+    out = np.full(len(times), "", dtype="U16")
+    if len(starts) == 0:
+        return out
+    # searchsorted gives the segment starting at or before each time; the
+    # segment only counts if the time is still inside it.
+    position = np.searchsorted(starts, times, side="right") - 1
+    inside = (position >= 0) & (times < starts[np.clip(position, 0, None)]
+                                + durations[np.clip(position, 0, None)])
+    out[inside] = np.asarray(labels, dtype="U16")[position[inside]]
+    return out
+
+
+def flag_rules(hypnogram: dict, rules) -> dict[str, np.ndarray]:
+    """Which segments each rule *would* change, without changing anything.
+
+    This is :func:`apply_rules` asking rather than telling. Each rule is run on
+    its own against ``hypnogram``, and a segment is flagged when the result
+    gives it a different label. The point is manual curation: the epochs a rule
+    would rewrite are exactly the ones worth a human's eyes, and flagging them
+    leaves the decision to the human instead of making it for them.
+
+    Returns ``{rule name: boolean mask}``, one mask per rule, each as long as
+    ``hypnogram["label"]``. Rules are evaluated independently, so a segment can
+    be flagged by more than one -- unlike :func:`apply_rules`, where an earlier
+    rule can rewrite a segment out from under a later one.
+
+    Any rule in :data:`RULES` works, so a rule added there gets flagging for
+    free.
+    """
+    times, durations, labels = _parts(hypnogram)
+    midpoints = times + durations / 2.0
+    original = np.asarray(labels, dtype="U16")
+
+    flags: dict[str, np.ndarray] = {}
+    for rule in rules or []:
+        name, kwargs = _as_call(rule)
+        after = _rule_function(name)(hypnogram, **kwargs)
+        changed = _label_at(after, midpoints) != original
+        # A midpoint no rule covers means the rule dropped the segment, which
+        # none of them do -- but if one ever did, silently reading "" as a
+        # change would be wrong, so only count it where there is a label.
+        flags[name] = changed & (_label_at(after, midpoints) != "")
+    return flags
 
 
 def _stage_seconds(hypnogram: dict) -> dict[str, float]:

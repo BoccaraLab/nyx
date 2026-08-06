@@ -42,7 +42,7 @@ import warnings
 import matplotlib.pyplot as plt
 import numpy as np
 
-from nyx.stages import COLORS
+from nyx.stages import COLORS, STAGE_ROW_ORDER
 
 __all__ = [
     "plot_scoring_overview",
@@ -64,17 +64,6 @@ __all__ = [
 ]
 
 CLUSTER_CMAP = "Set1"
-
-#: Stage order for hypnograms, top row first. The two "not scored" labels sit
-#: above WAKE, so the rows run from "no stage" down through progressively deeper
-#: sleep. NOSIGNAL is no usable signal; UNCLASSIFIED is signal a scorer declined
-#: to name. TR sits with the light NREM stages, above NREM2, being the
-#: shallowest of the three the rodent substage recipe separates.
-STAGE_ROW_ORDER = (
-    "NOSIGNAL", "UNCLASSIFIED", "WAKE", "REM", "NREM1", "NREM", "TR",
-    "NREM2", "NREM3",
-)
-
 
 def _cluster_colour(index: int):
     return plt.get_cmap(CLUSTER_CMAP)(index % 9)

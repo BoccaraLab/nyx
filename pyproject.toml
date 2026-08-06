@@ -48,14 +48,34 @@ notebooks = [
     "ipywidgets",
     "jupyterlab",
 ]
-# Interactive polygon-based cluster refinement in a Qt window.
+# Interactive matplotlib windows outside a notebook: the polygon cluster
+# refinement and the draggable threshold. Both are pure matplotlib -- this
+# extra only supplies a Qt backend for them.
 interactive = [
-    "PyQt5",
+    "PySide6>=6.5",
+]
+# The step-by-step scoring GUI. PySide6 rather than PyQt5 so the Qt stack is
+# LGPL like nyx itself; ephyviewer supplies the trace, time-frequency and
+# epoch-encoder views.
+gui = [
+    "PySide6>=6.5",
+    "ephyviewer>=1.8",
+    "pyqtgraph>=0.13",
+]
+# Everything. The self-reference has to use the distribution name.
+full = [
+    "nyx-sleep[notebooks,gui,interactive]",
 ]
 dev = [
     "pytest>=7",
+    "pytest-qt>=4.2",
     "ruff>=0.4",
 ]
+
+[project.scripts]
+# Not gui-scripts: nyx prints as it runs, and on Windows gui-scripts detaches
+# the console, so a failure would leave nothing to read.
+nyx-gui = "nyx.gui:main"
 
 [project.urls]
 Homepage = "https://github.com/lsignorelli/nyx"
@@ -64,9 +84,8 @@ Issues = "https://github.com/lsignorelli/nyx/issues"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# NOTE: params/ still lives at the repo root, so it is not installed with the
-# package yet. Moving the default parameter files under src/nyx/params/ (and
-# adding them here as package-data) is part of the params reorganisation.
+[tool.setuptools.package-data]
+nyx = ["params/*.json", "params/README.md"]
 
 [tool.ruff]
 line-length = 100
@@ -78,3 +97,4 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["gui: needs a Qt binding and ephyviewer"]
