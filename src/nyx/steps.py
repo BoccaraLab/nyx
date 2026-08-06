@@ -46,6 +46,7 @@ __all__ = [
     "run_step",
     "run_steps",
     "rename_clusters",
+    "label_clusters",
     "steps_from_params",
     "epoch_labels",
 ]
@@ -235,7 +236,7 @@ def run_step(
     emg
         Required when ``step.use_emg`` is set.
     """
-    from nyx.pipeline import assign_stages, cluster_sleep, compute_sleep_pca
+    from nyx.pipeline import cluster_sleep, compute_sleep_pca
     from nyx.types import WakeSleep
 
     scope = WakeSleep(hypnogram=hypnogram, threshold=0.0, nosignal_threshold=0.0)
@@ -245,14 +246,18 @@ def run_step(
     )
     clusters = cluster_sleep(pca, scope, clustering=step.clustering_params(), emg=emg)
 
-    return _label(step, hypnogram, pca, clusters)
+    return label_clusters(step, hypnogram, pca, clusters)
 
 
-def _label(step: Step, hypnogram: dict, pca, clusters) -> StepOutcome:
+def label_clusters(step: Step, hypnogram: dict, pca, clusters) -> StepOutcome:
     """Name the clusters and write the result back onto the epoch grid.
 
-    Split out of :func:`run_step` so :func:`rename_clusters` can redo it without
-    recomputing the PCA or the clustering, which is the expensive part.
+    The third of the three things :func:`run_step` does, and the only cheap
+    one: the PCA and the clustering are the minutes, this is the milliseconds.
+    Split out so that :func:`rename_clusters` can redo it without recomputing
+    them, and so that a caller holding its own cached ``pca`` and ``clusters``
+    -- an interactive session, say -- can drive the same three steps
+    separately and re-run only what actually changed.
     """
     from nyx.pipeline import assign_stages
     from nyx.types import WakeSleep
@@ -337,7 +342,7 @@ def rename_clusters(outcome: StepOutcome, stage_order=None,
         changes["refinements"] = list(refinements)
 
     step = _replace(outcome.step, **changes)
-    return _label(step, outcome.input_hypnogram, outcome.pca, outcome.clusters)
+    return label_clusters(step, outcome.input_hypnogram, outcome.pca, outcome.clusters)
 
 
 def run_steps(
