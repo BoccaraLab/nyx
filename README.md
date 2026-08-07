@@ -147,15 +147,22 @@ everything downstream is marked stale, but the signal check above it is not.
 |---|---|
 | Recording | which file, which two channels, which parameters |
 | Signal check | the mains notch, and where to start and stop |
-| EMG threshold | where the wake/sleep cut goes — **drag it**, on the histogram or the trace, and watch the wake percentage move |
+| EMG threshold | where the wake/sleep cut goes — **drag it**, on the distribution or on the power trace; they are the same line |
 | Sleep stages | components, clustering, and which cluster is REM |
-| Result | the scoring in context, and what to save |
+| Result | the scoring against the reference, corrected by hand, and saved |
 
-There is also a review window: scroll the traces and the spectrogram, and
-correct the hypnogram epoch by epoch. `alt`+arrows jump to the next change of
-stage; `ctrl`+arrows jump to the next epoch a postprocessing rule objects to,
-which are also drawn faded. What you edit is what gets saved, and `run.json`
-records that a human changed it.
+Every tab is a dock area, so the panels **scroll together and can be
+rearranged**: drag one beside another, tab them, or tear one off into its own
+window. The traces, spectrograms, component scores and hypnograms are all
+ephyviewer views on one clock — scroll the EEG and the EMG power, the PCs and
+the hypnogram all follow. The things that are not time series (the cluster
+scatter, the per-cluster spectra) are matplotlib, and dock alongside.
+
+The hypnogram on the Result tab is editable in place: `alt`+arrows jump to the
+next change of stage, `ctrl`+arrows to the next epoch a postprocessing rule
+objects to — those are drawn faded, so you can see them without navigating.
+What you edit is what gets saved, and `run.json` records that a human changed
+it.
 
 The GUI runs the same functions the notebooks do — no second implementation.
 On the Oxford benchmark it reproduces `03_score_rodents` segment for segment.
