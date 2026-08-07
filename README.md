@@ -23,6 +23,14 @@ conda activate nyx
 pip install -e ".[notebooks]"
 ```
 
+Optional extras: `gui` for the scoring window, `notebooks` for the examples,
+`interactive` for the matplotlib tools outside a notebook, and `full` for all
+three.
+
+```bash
+pip install -e ".[full]"
+```
+
 ## Try it without any data
 
 ```bash
@@ -105,12 +113,58 @@ In [`examples/`](examples/). The first two need **no data at all**:
 |---|---|---|
 | [`01_score_recording`](examples/01_score_recording.ipynb) | nothing | one recording step by step, and the four decisions that are yours |
 | [`02_signal_check`](examples/02_signal_check.ipynb) | nothing | mains interference and artefacts, and what fixing them is worth |
-| [`04_human_five_stage`](examples/04_human_five_stage.ipynb) | a human PSG | the human pipeline start to end: four steps, five stages, and collapsing to coarser ones |
 | [`03_score_rodents`](examples/03_score_rodents.ipynb) | one 78 MB download | a real mouse recording against a ten-expert consensus |
+| [`04_score_humans`](examples/04_score_humans.ipynb) | a human PSG | the human pipeline start to end: four steps, five stages, and collapsing to coarser ones |
 
 Start with `01`. Note that the synthetic signal used in `01`–`02` is built to
 contain exactly the structure nyx looks for, so it scores near-perfectly — it
 shows you the mechanics, not the accuracy. `03` is the honest one.
+
+---
+
+## The GUI
+
+```bash
+pip install -e ".[gui]"
+nyx-gui --help     # check the install
+nyx-gui            # or: nyx-gui --demo
+```
+
+| | |
+|---|---|
+| `nyx-gui recording.edf` | open with that file ready to load |
+| `nyx-gui --params mouse` | start from a preset |
+| `nyx-gui --config results/m01/run.json` | resume a saved run, decisions and all |
+| `nyx-gui --demo` | the synthetic recording, no data needed |
+
+One window, tabs down the side, one tab per decision the notebooks stop at.
+Every tab is reachable as soon as its inputs exist, so you can go back and
+retune a threshold after seeing the clusters. Each tab shows whether what you
+are looking at is current or out of date: change the EMG threshold and
+everything downstream is marked stale, but the signal check above it is not.
+
+| tab | the decision |
+|---|---|
+| Recording | which file, which two channels, which parameters |
+| Signal check | the mains notch, and where to start and stop |
+| EMG threshold | where the wake/sleep cut goes — **drag it**, on the histogram or the trace, and watch the wake percentage move |
+| Sleep stages | components, clustering, and which cluster is REM |
+| Result | the scoring in context, and what to save |
+
+There is also a review window: scroll the traces and the spectrogram, and
+correct the hypnogram epoch by epoch. `alt`+arrows jump to the next change of
+stage; `ctrl`+arrows jump to the next epoch a postprocessing rule objects to,
+which are also drawn faded. What you edit is what gets saved, and `run.json`
+records that a human changed it.
+
+The GUI runs the same functions the notebooks do — no second implementation.
+On the Oxford benchmark it reproduces `03_score_rodents` segment for segment.
+Nothing in it is required: the notebooks and `score_recording` are unchanged.
+
+Its views come from [ephyviewer](https://github.com/NeuralEnsemble/ephyviewer),
+used as published — the sleep-specific parts (a scalogram in dB, the curation
+shortcuts) are subclasses in [`nyx/gui/viewers.py`](src/nyx/gui/viewers.py)
+rather than a patched copy, so there is no fork to keep in step.
 
 ---
 

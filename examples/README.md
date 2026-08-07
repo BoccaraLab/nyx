@@ -11,6 +11,21 @@ pointing nyx at your own files.
 | [`03_score_rodents.ipynb`](03_score_rodents.ipynb) | one recorded downloaded in the notebook | the rodent pipeline start to end, on a real mouse recording scored against a ten-expert consensus |
 | [`04_score_humans.ipynb`](04_score_humans.ipynb) | a human PSG recording (check open source human repos in the last section) | the human pipeline start to end: four steps, five stages, and collapsing to coarser ones |
 
+## Or use the GUI
+
+If you would rather click than type:
+
+```bash
+pip install -e ".[gui]"
+nyx-gui
+```
+
+It has a tab per decision these notebooks stop at, and a **Try the demo
+recording** button on the first one, so it needs no data either. The EMG
+threshold is draggable there, and there is a review window for correcting the
+hypnogram by hand — which the notebooks cannot do. It calls the same functions,
+so anything you work out in one transfers to the other.
+
 There is also [`run_demo.py`](run_demo.py), which needs nothing and no notebook
 server:
 

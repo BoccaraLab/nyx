@@ -425,6 +425,52 @@ def test_every_filter_string_ends_with_all_files():
 # ---------------------------------------------------------------------------
 
 
+def test_the_command_line_works_without_the_gui_extras_installed(capsys):
+    """``nyx-gui --help`` must answer even where Qt is not installed.
+
+    It is the first thing anyone runs to check the install, so it cannot be
+    the thing that needs the install to work.
+    """
+    import nyx.gui
+
+    with pytest.raises(SystemExit) as exit_code:
+        nyx.gui.run(["--help"])
+
+    assert exit_code.value.code == 0
+    printed = capsys.readouterr().out
+    assert "nyx-gui" in printed
+    assert "--demo" in printed
+
+
+def test_the_command_line_lists_the_presets_it_will_accept(capsys):
+    import nyx.gui
+
+    with pytest.raises(SystemExit):
+        nyx.gui.run(["--help"])
+
+    printed = capsys.readouterr().out
+    assert "mouse" in printed and "human" in printed
+
+
+def test_the_command_line_reports_the_version(capsys):
+    import nyx.gui
+
+    with pytest.raises(SystemExit) as exit_code:
+        nyx.gui.run(["--version"])
+
+    assert exit_code.value.code == 0
+    assert nyx.__version__ in capsys.readouterr().out
+
+
+def test_a_bad_argument_is_refused_rather_than_ignored(capsys):
+    import nyx.gui
+
+    with pytest.raises(SystemExit) as exit_code:
+        nyx.gui.run(["--not-a-flag"])
+
+    assert exit_code.value.code != 0
+
+
 def test_the_session_layer_imports_no_qt():
     """No Qt, directly or transitively, in the pipeline-state layer.
 

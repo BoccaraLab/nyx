@@ -56,28 +56,89 @@ def _missing_dependency(exc: Exception) -> str:
     )
 
 
+def _parser():
+    import argparse
+
+    import nyx
+
+    parser = argparse.ArgumentParser(
+        prog="nyx-gui",
+        description=(
+            "Score a sleep recording: one window, one tab per decision. "
+            "Runs the same pipeline as the example notebooks."
+        ),
+        epilog=(
+            "With no arguments it opens empty; the Recording tab has a "
+            "'Try the demo recording' button that needs no data."
+        ),
+    )
+    parser.add_argument(
+        "recording", nargs="?",
+        help="Recording to open (.edf, .npz, or a spikeinterface folder).",
+    )
+    parser.add_argument(
+        "--params", metavar="NAME",
+        help=(
+            "Parameter preset or path to a JSON file. Presets: "
+            + ", ".join(nyx.available_params())
+        ),
+    )
+    parser.add_argument(
+        "--config", metavar="PATH",
+        help=(
+            "Resume from a config or a previous run's run.json, with its "
+            "recording, window and decisions already filled in."
+        ),
+    )
+    parser.add_argument(
+        "--demo", action="store_true",
+        help="Open the synthetic demo recording straight away.",
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"nyx {nyx.__version__}"
+    )
+    return parser
+
+
 def run(argv: list[str] | None = None) -> int:
     """Open the GUI and run it until the window closes.
 
     Returns the Qt exit code. Importing this module does *not* import Qt --
-    that happens here, after the binding is pinned.
+    that happens here, after the binding is pinned, so ``--help`` and
+    ``--version`` work even without the GUI extras installed.
     """
+    arguments = _parser().parse_args(argv)
+
     _pin_qt_binding()
 
     try:
         from PySide6 import QtWidgets
 
         from nyx.gui.mainwindow import MainWindow
+        from nyx.gui.session import ScoringSession
     except ImportError as exc:  # pragma: no cover - depends on the install
         sys.stderr.write(_missing_dependency(exc))
         return 1
 
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(
-        list(argv) if argv is not None else sys.argv
-    )
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([sys.argv[0]])
     app.setApplicationName("nyx")
 
-    window = MainWindow()
+    session = None
+    if arguments.config:
+        import nyx
+
+        session = ScoringSession.from_config(nyx.load_config(arguments.config))
+
+    window = MainWindow(session)
+
+    if arguments.params:
+        window.tabs[0].preset.setCurrentText(arguments.params)
+    if arguments.recording:
+        window.tabs[0].path.setText(arguments.recording)
+        window.tabs[0]._offer_channels()
+    if arguments.demo:
+        window.tabs[0]._load_demo()
+
     window.show()
     return int(app.exec())
 
