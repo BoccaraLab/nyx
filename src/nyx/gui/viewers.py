@@ -665,6 +665,13 @@ class NyxEpochEncoder(EpochEncoder):
 # ---------------------------------------------------------------------------
 
 
+#: Fallback STFT window, in seconds, for params that do not declare an epoch
+#: length. Nyx's own presets use 2 s (EEG) and 4 s (EMG); anything on that
+#: order shows sleep bands, and the value only has to be far away from
+#: upstream's degenerate 0.01 s.
+DEFAULT_BINSIZE = 2.0
+
+
 def spectrogram_params_from(params: dict, channel: str = "EEG") -> dict:
     """Spectrogram settings matching the params a recording is scored with.
 
@@ -748,13 +755,25 @@ class NyxSpectrogramWorker(SpectrogramWorker):
 
 
 def _spectrogram_params() -> list:
-    """Upstream's, but starting on jet."""
+    """Upstream's, but starting on jet and with a window worth transforming.
+
+    Upstream's ``binsize`` default is 0.01 s, which at any physiological
+    sampling rate is a **one-sample** STFT window: scipy detrends each segment
+    against its own mean, so every value comes out exactly zero, and the panel
+    is blank. :func:`spectrogram_params_from` overrides this from the params
+    when they declare an epoch length, but params are not obliged to, so the
+    default has to be usable on its own rather than merely usually replaced.
+    """
     params = copy.deepcopy(upstream_spectrogram_params)
     for entry in params:
         if entry.get("name") == "colormap":
             entry["value"] = "jet"
             if "jet" not in entry.get("limits", []):
                 entry["limits"] = list(entry.get("limits", [])) + ["jet"]
+        if entry.get("name") == "scalogram":  # upstream's name for the group
+            for child in entry.get("children", []):
+                if child.get("name") == "binsize":
+                    child["value"] = DEFAULT_BINSIZE
     return params
 
 

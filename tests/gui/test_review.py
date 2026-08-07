@@ -112,6 +112,52 @@ def test_the_window_has_the_rows_the_overview_figure_has(window):
     ]
 
 
+def test_the_review_window_uses_nyxs_viewers_not_upstreams(review, scored):
+    """The subclasses are not cosmetic: upstream's Fourier worker takes
+    ``log10`` of a spectrogram that can hold exact zeros, and hands pyqtgraph
+    an image of ``-inf`` to render -- an access violation, not an exception.
+    The review window once built upstream's viewer directly, with its own copy
+    of the setup that forgot ``binsize``, so it ran a one-sample window where
+    *every* value is zero and the crash was reached the moment it repainted.
+    """
+    from nyx.gui.viewers import NyxSpectrogramViewer, NyxTimeFreqViewer
+
+    w = review(scored.result(), params=scored.params, scalogram=False)
+    assert isinstance(w.viewers["EEG spectrum"]["widget"], NyxSpectrogramViewer)
+
+    w = review(scored.result(), params=scored.params, scalogram=True)
+    assert isinstance(w.viewers["EEG spectrum"]["widget"], NyxTimeFreqViewer)
+
+
+def test_the_fourier_window_is_never_a_single_sample(review, scored):
+    """A window of one sample is what upstream's 0.01 s default gives at any
+    physiological sampling rate, and it makes the panel blank.
+    """
+    w = review(scored.result(), params=scored.params, scalogram=False)
+    viewer = w.viewers["EEG spectrum"]["widget"]
+
+    binsize = viewer.params["scalogram", "binsize"]
+    rate = viewer.source.sample_rate
+    assert int(binsize * rate) > 1
+
+
+def test_the_fourier_default_stands_alone_without_params(qtbot, scored):
+    """Params are not obliged to declare an epoch length, so the default has
+    to be usable rather than merely usually overridden.
+    """
+    from ephyviewer.datasource import SpikeInterfaceRecordingSource
+
+    from nyx.gui.viewers import NyxSpectrogramViewer
+
+    source = SpikeInterfaceRecordingSource(recording=scored.result().recording.eeg)
+    viewer = NyxSpectrogramViewer(source=source, name="EEG")
+    qtbot.addWidget(viewer)
+    try:
+        assert int(viewer.params["scalogram", "binsize"] * source.sample_rate) > 1
+    finally:
+        viewer.close()
+
+
 def test_a_recording_without_an_emg_simply_has_no_emg_rows(review, session):
     import dataclasses
 

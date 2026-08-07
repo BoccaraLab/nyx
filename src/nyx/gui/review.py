@@ -17,7 +17,6 @@ import numpy as np
 from ephyviewer import (
     EpochViewer,
     MainViewer,
-    SpectrogramViewer,
     TraceViewer,
 )
 from ephyviewer.datasource import (
@@ -27,7 +26,7 @@ from ephyviewer.datasource import (
 )
 
 from nyx.gui.hypnogram import from_epoch_dict, stage_palette, to_epoch_dict
-from nyx.gui.viewers import NyxEpochEncoder, NyxTimeFreqViewer, timefreq_params_from
+from nyx.gui.viewers import NyxEpochEncoder, make_timefreq_viewer
 
 __all__ = ["NyxEpochSource", "build_review_window", "open_review_window"]
 
@@ -172,13 +171,13 @@ def build_review_window(
         emg_source = SpikeInterfaceRecordingSource(recording=recording.emg)
         window.add_view(TraceViewer(source=emg_source, name="EMG"))
         window.add_view(
-            _timefreq(emg_source, "EMG spectrum", params, "EMG", scalogram),
+            make_timefreq_viewer(emg_source, "EMG spectrum", params, "EMG", scalogram),
             tabify_with="EMG",
         )
 
     window.add_view(TraceViewer(source=eeg_source, name="EEG"))
     window.add_view(
-        _timefreq(eeg_source, "EEG spectrum", params, "EEG", scalogram)
+        make_timefreq_viewer(eeg_source, "EEG spectrum", params, "EEG", scalogram)
     )
 
     if reference is not None:
@@ -209,28 +208,6 @@ def build_review_window(
     window.epoch_source = source  # so a caller can read the edit back
     window.encoder = encoder
     return window
-
-
-def _timefreq(source, name: str, params: dict, channel: str, scalogram: bool):
-    """The time-frequency view, matched to what the scoring computed."""
-    if scalogram:
-        viewer = NyxTimeFreqViewer(source=source, name=name)
-        viewer.apply_settings(timefreq_params_from(params, channel))
-        return viewer
-
-    viewer = SpectrogramViewer(source=source, name=name)
-    section = params.get(channel, {}) or {}
-    for key, value in (
-        ("f_start", section.get("min_freq")),
-        ("f_stop", section.get("max_freq")),
-    ):
-        if value is None:
-            continue
-        try:
-            viewer.params.param("spectrogram").param(key).setValue(float(value))
-        except Exception:  # noqa: BLE001 - an older ephyviewer may name it differently
-            pass
-    return viewer
 
 
 def open_review_window(session, parent=None):
