@@ -2,8 +2,8 @@
 
 Both classes here re-apply, as subclasses of upstream ephyviewer, changes that
 previously lived in a fork of it (``BoccaraLab/ephyviewer@sleepscoring``). They
-have to be subclasses: PyPI rejects direct git-URL dependencies, so
-``pip install "nyx-sleep[gui]"`` could never resolve a fork. Upstream exposes
+have to be subclasses rather than a dependency on the fork: PyPI rejects direct
+git-URL dependencies, so a published nyx could never name one. Upstream exposes
 ``_default_params``, ``_default_by_channel_params`` and ``_ControllerClass`` as
 class attributes, which is most of what is needed.
 

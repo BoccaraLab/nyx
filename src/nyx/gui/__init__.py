@@ -6,9 +6,9 @@ goes, which cluster is REM, and what to save. Every tab is reachable as soon as
 its inputs exist, and each one shows whether what you are looking at is current
 or stale.
 
-Install it with::
+Install it from a clone with::
 
-    pip install "nyx-sleep[gui]"
+    pip install -e ".[gui]"
 
 The layering is worth knowing about if you are reading the code:
 
@@ -48,11 +48,15 @@ def _pin_qt_binding() -> None:
 
 
 def _missing_dependency(exc: Exception) -> str:
+    # From a clone rather than from PyPI: nyx is installed from the repository
+    # for now, and telling someone to pip install a name that does not resolve
+    # is worse than telling them nothing.
     return (
         f"The nyx GUI needs its optional dependencies, and one is missing:\n"
         f"    {type(exc).__name__}: {exc}\n\n"
-        f"Install them with:\n"
-        f"    pip install \"nyx-sleep[gui]\"\n"
+        f"Install them from your clone of the repository:\n"
+        f"    pip install -e \".[gui]\"\n\n"
+        f"See https://github.com/BoccaraLab/nyx\n"
     )
 
 
