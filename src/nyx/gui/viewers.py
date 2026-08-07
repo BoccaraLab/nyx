@@ -38,6 +38,7 @@ import scipy.fftpack
 import scipy.signal
 import scipy.stats
 from ephyviewer.myqt import QT
+from ephyviewer.spectrogramviewer import SpectrogramViewer, SpectrogramWorker
 from ephyviewer.timefreqviewer import (
     TimeFreqViewer,
     TimeFreqViewer_ParamController,
@@ -54,8 +55,11 @@ from ephyviewer import EpochEncoder  # isort: skip
 
 __all__ = [
     "NyxTimeFreqViewer",
+    "NyxSpectrogramViewer",
     "NyxEpochEncoder",
     "timefreq_params_from",
+    "spectrogram_params_from",
+    "make_timefreq_viewer",
 ]
 
 def _with_nyx_timefreq_params() -> list:
@@ -96,6 +100,19 @@ def _with_two_ended_clim() -> list:
         else:
             params.append(entry)
     return params
+
+
+def _emit(signal, *args) -> None:
+    """Emit, unless the viewer on the other end has already been destroyed.
+
+    Closing a viewer tells its threads to quit, but a request already in
+    flight still runs to completion -- and by then the C++ object it reports
+    to may be gone, which raises rather than being ignored.
+    """
+    try:
+        signal.emit(*args)
+    except RuntimeError:
+        pass
 
 
 NYX_TIMEFREQ_PARAMS = _with_nyx_timefreq_params()
@@ -211,7 +228,7 @@ class NyxTimeFreqWorker(TimeFreqWorker):
 
         t1 = self.source.index_to_time(i_start)
         t2 = self.source.index_to_time(i_start + wt_map.shape[0] * ds_ratio)
-        self.data_ready.emit(chan, t, t_start, t_stop, t1, t2, wt_map)
+        _emit(self.data_ready, chan, t, t_start, t_stop, t1, t2, wt_map)
 
 
 class NyxTimeFreqController(TimeFreqViewer_ParamController):
@@ -535,3 +552,167 @@ class NyxEpochEncoder(EpochEncoder):
             if index < start:
                 self._seek(index)
                 return
+
+
+# ---------------------------------------------------------------------------
+# The Fourier view
+# ---------------------------------------------------------------------------
+
+
+def spectrogram_params_from(params: dict, channel: str = "EEG") -> dict:
+    """Spectrogram settings matching the params a recording is scored with.
+
+    Upstream defaults to ``binsize = 0.01`` s, which at a rodent sampling rate
+    is a **one-sample window** -- the transform is meaningless and the panel
+    looks empty. nyx already knows the epoch length and overlap it computes its
+    own features with, so those are used instead and the view shows what the
+    scoring sees.
+    """
+    section = params.get(channel, {}) or {}
+    settings = {}
+    if section.get("binsize"):
+        settings["binsize"] = float(section["binsize"])
+    if section.get("overlapratio") is not None:
+        settings["overlapratio"] = float(section["overlapratio"])
+    return settings
+
+
+class NyxSpectrogramWorker(SpectrogramWorker):
+    """Upstream's worker, without the debug print and the log of zero.
+
+    Two things upstream does that are wrong in a GUI: it prints ``nperseg`` and
+    ``noverlap`` to stdout on *every redraw*, and it takes ``log10`` of a
+    spectrogram that can contain exact zeros -- a flat or disconnected stretch
+    of signal -- which fills the console with divide-by-zero warnings and puts
+    ``-inf`` in the image.
+
+    Copied rather than extended because both are in the middle of the method.
+    The lines that differ are marked.
+    """
+
+    def on_request_data(self, chan, t, t_start, t_stop, visible_channels, worker_params):
+        if chan != self.chan or not visible_channels[chan]:
+            return
+        if self.viewer.t != t:
+            return  # the viewer has moved on already
+
+        binsize = worker_params["binsize"]
+        overlapratio = worker_params["overlapratio"]
+        scaling = worker_params["scaling"]
+        detrend = worker_params["detrend"]
+        mode = worker_params["mode"]
+
+        i_start = self.source.time_to_index(t_start)
+        i_stop = self.source.time_to_index(t_stop)
+        i_start = min(max(0, i_start), self.source.get_length())
+        i_stop = min(max(0, i_stop), self.source.get_length())
+
+        sr = self.source.sample_rate
+        nperseg = int(binsize * sr)
+        noverlap = int(overlapratio * nperseg)
+        if noverlap >= nperseg:
+            noverlap = noverlap - 1
+        # -- nyx: no debug print here. Upstream writes nperseg and noverlap to
+        #    stdout on every redraw, which is once per scroll step.
+
+        if nperseg == 0 or (i_stop - i_start) < nperseg:
+            _emit(self.data_ready, chan, t, t_start, t_stop, t_start, t_stop, None)
+            return
+
+        sigs_chunk = self.source.get_chunk(i_start=i_start, i_stop=i_stop)
+        sig = sigs_chunk[:, chan]
+
+        _freqs, times, Sxx = scipy.signal.spectrogram(
+            sig, fs=sr, nperseg=nperseg, noverlap=noverlap,
+            detrend=detrend, scaling=scaling, mode=mode,
+        )
+
+        if worker_params["scale"] == "dB" and mode == "psd":
+            # -- nyx: floor it. A flat or disconnected stretch gives exact
+            #    zeros, and log10(0) is -inf plus a warning per redraw.
+            Sxx = 10.0 * np.log10(np.maximum(Sxx, 1e-12))
+
+        if len(times) >= 2:
+            slide = times[1] - times[0]
+            t1 = self.source.index_to_time(i_start) + times[0] - slide / 2.0
+            t2 = self.source.index_to_time(i_start) + times[-1] + slide / 2.0
+            _emit(self.data_ready, chan, t, t_start, t_stop, t1, t2, Sxx)
+        else:
+            _emit(self.data_ready, chan, t, t_start, t_stop, t_start, t_stop, None)
+
+
+class NyxSpectrogramViewer(SpectrogramViewer):
+    """The fast Fourier view, with settings that show something.
+
+    Same relationship to upstream as :class:`NyxTimeFreqViewer`: the worker is
+    swapped, which upstream has no hook for, so ``__init__`` is copied to do
+    it. A two-line ``_WorkerClass`` attribute upstream would remove both.
+    """
+
+    def __init__(self, **kargs):
+        # Copied from SpectrogramViewer.__init__ so the worker class can be
+        # swapped; upstream constructs SpectrogramWorker by name. The
+        # attribute names below are upstream's -- `timefreq_makers` for the
+        # workers, even in the Fourier viewer -- because closeEvent stops the
+        # threads by those names.
+        from ephyviewer.base import BaseMultiChannelViewer
+
+        BaseMultiChannelViewer.__init__(self, **kargs)
+
+        self.make_params()
+
+        self.by_channel_params.blockSignals(True)
+        for c in range(self.source.nb_channel):
+            self.by_channel_params["ch" + str(c), "visible"] = c == 0
+        self.by_channel_params.blockSignals(False)
+
+        self.make_param_controller()
+        self.params_controller.some_clim_changed.connect(self.refresh)
+
+        self.set_layout()
+        self.change_color_scale()
+        self.create_grid()
+
+        self.last_Sxx = {}
+        self.threads = []
+        self.timefreq_makers = []
+        for c in range(self.source.nb_channel):
+            thread = QT.QThread(parent=self)
+            self.threads.append(thread)
+            worker = NyxSpectrogramWorker(self.source, self, c)  # <- the change
+            self.timefreq_makers.append(worker)
+            worker.moveToThread(thread)
+            thread.start()
+            self.last_Sxx[c] = None
+            worker.data_ready.connect(self.on_data_ready)
+            self.request_data.connect(worker.on_request_data)
+
+        self.params.param("xsize").setLimits((0, np.inf))
+
+    def apply_settings(self, settings: dict) -> None:
+        """Set spectrogram parameters from :func:`spectrogram_params_from`."""
+        # Upstream calls the group "scalogram" even in the Fourier viewer.
+        group = self.params.param("scalogram")
+        for name, value in settings.items():
+            try:
+                group.param(name).setValue(value)
+            except Exception:  # noqa: BLE001 - an unknown key is not fatal
+                continue
+        self.refresh()
+
+
+def make_timefreq_viewer(source, name: str, params: dict, channel: str,
+                         scalogram: bool):
+    """The time-frequency view for a channel, set up to match the params.
+
+    ``scalogram`` picks the Morlet view -- easier to read, much slower, and
+    what the scalogram feature backend computes -- over the Fourier one.
+    """
+    if scalogram:
+        viewer = NyxTimeFreqViewer(source=source, name=name)
+        viewer.apply_settings(timefreq_params_from(params, channel))
+        return viewer
+
+    viewer = NyxSpectrogramViewer(source=source, name=name)
+    viewer.apply_settings(spectrogram_params_from(params, channel))
+    return viewer

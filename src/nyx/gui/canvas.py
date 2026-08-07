@@ -40,7 +40,47 @@ from matplotlib.backends.backend_qtagg import (  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget  # noqa: E402
 
-__all__ = ["PanelCanvas", "FigureView"]
+__all__ = ["PanelCanvas", "FigureView", "DARK", "darken"]
+
+#: ephyviewer draws on black, and a white matplotlib panel docked beside one is
+#: jarring enough to be distracting. These are applied to the *figure*, not to
+#: rcParams, so nothing nyx writes to disk changes -- ``save_report`` keeps
+#: producing figures on white, which is what belongs in a paper.
+DARK = {
+    "figure": "#1b1b1b",
+    "axes": "#1b1b1b",
+    "ink": "#d8d8d8",
+    "grid": "#3a3a3a",
+}
+
+
+def darken(figure) -> None:
+    """Recolour a finished figure to sit beside the ephyviewer panels.
+
+    Deliberately applied after the fact rather than through a style context:
+    the report functions choose their own colours for stages and clusters, and
+    those must survive -- only the furniture changes.
+    """
+    figure.patch.set_facecolor(DARK["figure"])
+    for ax in figure.axes:
+        ax.set_facecolor(DARK["axes"])
+        for spine in ax.spines.values():
+            spine.set_color(DARK["grid"])
+        ax.tick_params(colors=DARK["ink"], which="both")
+        for item in (ax.title, ax.xaxis.label, ax.yaxis.label):
+            item.set_color(DARK["ink"])
+        for text in ax.texts:
+            if text.get_color() in ("black", "k", "#000000"):
+                text.set_color(DARK["ink"])
+        legend = ax.get_legend()
+        if legend is not None:
+            legend.get_frame().set_facecolor(DARK["axes"])
+            legend.get_frame().set_edgecolor(DARK["grid"])
+            for text in legend.get_texts():
+                text.set_color(DARK["ink"])
+    for ax in figure.axes:
+        if hasattr(ax, "get_yaxis") and ax.get_label() == "<colorbar>":
+            ax.tick_params(colors=DARK["ink"])
 
 
 class PanelCanvas(FigureCanvasQTAgg):
@@ -52,9 +92,10 @@ class PanelCanvas(FigureCanvasQTAgg):
     so that test is load-bearing for the GUI as well as for ``save_report``.
     """
 
-    def __init__(self, parent=None, figsize=(6.0, 4.0), dpi=100):
+    def __init__(self, parent=None, figsize=(6.0, 4.0), dpi=100, dark: bool = True):
         figure = Figure(figsize=figsize, dpi=dpi, layout="constrained")
         super().__init__(figure)
+        self.dark = dark
         if parent is not None:
             self.setParent(parent)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -93,6 +134,8 @@ class PanelCanvas(FigureCanvasQTAgg):
                 transform=self._ax.transAxes,
             )
             self._ax.set_axis_off()
+        if self.dark:
+            darken(self.figure)
         self.draw_idle()
         return self._ax
 
@@ -105,8 +148,10 @@ class FigureView(QWidget):
     instance -- in one place instead of duplicating it here.
     """
 
-    def __init__(self, parent=None, toolbar: bool = True, placeholder: str = ""):
+    def __init__(self, parent=None, toolbar: bool = True, placeholder: str = "",
+                 dark: bool = True):
         super().__init__(parent)
+        self.dark = dark
         self._figure = None
         self._canvas = None
         self._toolbar = None
@@ -137,6 +182,8 @@ class FigureView(QWidget):
         self._release()
         self._placeholder.hide()
 
+        if self.dark:
+            darken(figure)
         self._figure = figure
         self._canvas = FigureCanvasQTAgg(figure)
         self._canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)

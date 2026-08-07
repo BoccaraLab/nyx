@@ -21,7 +21,7 @@ for everything in between.
 
 from __future__ import annotations
 
-from ephyviewer import SpectrogramViewer, TraceViewer
+from ephyviewer import TraceViewer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -38,7 +38,11 @@ from nyx.gui.panels import MplPanel, TextPanel
 from nyx.gui.session import Stage
 from nyx.gui.sources import trace_sources
 from nyx.gui.tabs.base import Tab
-from nyx.gui.viewers import NyxTimeFreqViewer, timefreq_params_from
+from nyx.gui.viewers import (
+    make_timefreq_viewer,
+    spectrogram_params_from,
+    timefreq_params_from,
+)
 
 __all__ = ["SignalTab"]
 
@@ -55,6 +59,7 @@ class SignalTab(Tab):
 
     def build_controls(self) -> list:
         self._check = None
+        self._seeded = False
 
         # -- checking
         check_box = QGroupBox("Measure the signal")
@@ -110,6 +115,63 @@ class SignalTab(Tab):
         self.harmonics.setValue(3)
         notch_form.addRow("harmonics", self.harmonics)
 
+        # -- what the spectrogram shows
+        view_box = QGroupBox("Time-frequency view")
+        view_form = QFormLayout(view_box)
+
+        self.scalogram = QCheckBox("wavelet (slower, easier to read)")
+        self.scalogram.setToolTip(
+            "A Morlet scalogram in dB, as nyx's scalogram feature backend "
+            "computes it. Much slower than the Fourier view -- it recomputes "
+            "on every scroll -- and much easier to read."
+        )
+        self.scalogram.toggled.connect(self._rebuild_viewers)
+        view_form.addRow("", self.scalogram)
+
+        self.binsize = QDoubleSpinBox()
+        self.binsize.setRange(0.01, 600.0)
+        self.binsize.setDecimals(2)
+        self.binsize.setSingleStep(0.5)
+        self.binsize.setSuffix(" s")
+        self.binsize.setToolTip(
+            "Window length of the transform, and the epoch length nyx scores "
+            "on. ephyviewer's own default is 0.01 s, which at these sampling "
+            "rates is a one-sample window and shows nothing."
+        )
+        view_form.addRow("binsize", self.binsize)
+
+        self.overlap = QDoubleSpinBox()
+        self.overlap.setRange(0.0, 0.95)
+        self.overlap.setDecimals(2)
+        self.overlap.setSingleStep(0.05)
+        view_form.addRow("overlap", self.overlap)
+
+        self.fmax = QDoubleSpinBox()
+        self.fmax.setRange(1.0, 5000.0)
+        self.fmax.setDecimals(1)
+        self.fmax.setSuffix(" Hz")
+        view_form.addRow("max frequency", self.fmax)
+
+        for spin in (self.binsize, self.overlap, self.fmax):
+            spin.valueChanged.connect(self._settings_changed)
+
+        self.channel = QComboBox()
+        self.channel.addItems(["EEG", "EMG"])
+        self.channel.setToolTip(
+            "Which section of the params these settings belong to. The two "
+            "bands differ: EEG is roughly 0.5-40 Hz, EMG 30-100."
+        )
+        self.channel.currentTextChanged.connect(self._load_settings)
+        view_form.addRow("settings for", self.channel)
+
+        apply_settings = QPushButton("Apply to the params")
+        apply_settings.setToolTip(
+            "Write these into the parameters, so the scoring uses them too -- "
+            "not just the view."
+        )
+        apply_settings.clicked.connect(self._apply_settings)
+        view_form.addRow("", apply_settings)
+
         # -- window
         window_box = QGroupBox("Analysis window")
         window_form = QFormLayout(window_box)
@@ -136,7 +198,7 @@ class SignalTab(Tab):
         here.clicked.connect(self._window_from_view)
         window_form.addRow("", here)
 
-        return [check_box, notch_box, window_box]
+        return [check_box, view_box, notch_box, window_box]
 
     def build_docks(self) -> None:
         self.summary = TextPanel(
@@ -175,28 +237,70 @@ class SignalTab(Tab):
         self._built_for = recording
 
     def _timefreq(self, source, name: str, channel: str):
-        """The spectrogram, matched to what the scoring will compute.
+        """The time-frequency view for a channel, set from the params.
 
-        The fast Fourier view by default -- this tab is for scrolling a whole
+        The Fourier view by default: this tab is for scrolling a whole
         recording, and a wavelet transform per redraw is not what that wants.
+        The checkbox switches it.
         """
-        params = self.session.params
-        if params.get("features", {}).get("method") == "scalogram":
-            viewer = NyxTimeFreqViewer(source=source, name=name)
-            viewer.apply_settings(timefreq_params_from(params, channel))
-            return viewer
+        return make_timefreq_viewer(
+            source, name, self._view_params(channel), channel,
+            self.scalogram.isChecked(),
+        )
 
-        viewer = SpectrogramViewer(source=source, name=name)
-        section = params.get(channel, {}) or {}
-        for key, value in (("f_start", section.get("min_freq")),
-                           ("f_stop", section.get("max_freq"))):
-            if value is None:
-                continue
-            try:
-                viewer.params.param("spectrogram").param(key).setValue(float(value))
-            except Exception:  # noqa: BLE001 - naming varies between releases
-                pass
-        return viewer
+    def _view_params(self, channel: str) -> dict:
+        """The session's params with the panel's overrides on top.
+
+        The settings can be tried on the view before being written into the
+        params, so a bad binsize costs a redraw rather than a recompute.
+        """
+        params = {k: dict(v) if isinstance(v, dict) else v
+                  for k, v in self.session.params.items()}
+        section = dict(params.get(channel, {}) or {})
+        if self.channel.currentText() == channel:
+            section["binsize"] = float(self.binsize.value())
+            section["overlapratio"] = float(self.overlap.value())
+            section["max_freq"] = float(self.fmax.value())
+        params[channel] = section
+        return params
+
+    def _rebuild_viewers(self) -> None:
+        self._built_for = None
+        self.safe_refresh()
+
+    def _settings_changed(self) -> None:
+        """Retune the open viewers without rebuilding the dock layout."""
+        channel = self.channel.currentText()
+        params = self._view_params(channel)
+        viewer = self.docks.panel(f"{channel} spectrum")
+        if viewer is None or not hasattr(viewer, "apply_settings"):
+            return
+        if self.scalogram.isChecked():
+            viewer.apply_settings(timefreq_params_from(params, channel))
+        else:
+            viewer.apply_settings(spectrogram_params_from(params, channel))
+
+    def _load_settings(self) -> None:
+        """Read the spin boxes back from the params for the chosen channel."""
+        section = self.session.params.get(self.channel.currentText(), {}) or {}
+        for spin, key, fallback in (
+            (self.binsize, "binsize", 4.0),
+            (self.overlap, "overlapratio", 0.5),
+            (self.fmax, "max_freq", 40.0),
+        ):
+            with self.quiet(spin):
+                spin.setValue(float(section.get(key, fallback) or fallback))
+
+    def _apply_settings(self) -> None:
+        """Write the view's settings into the params the scoring will use."""
+        channel = self.channel.currentText()
+        params = self._view_params(channel)
+        self.session.set_params(params)
+        self.status.emit(
+            f"{channel}: binsize {self.binsize.value():g} s, overlap "
+            f"{self.overlap.value():g}, up to {self.fmax.value():g} Hz. "
+            f"The scoring will use these too."
+        )
 
     # -- measuring ---------------------------------------------------------
 
@@ -265,6 +369,24 @@ class SignalTab(Tab):
 
     def refresh(self) -> None:
         recording = self.session.recording
+
+        # Before _build_viewers: the viewers are built from these, and a spin
+        # box still at its minimum means a 0.01 s window -- one sample, and a
+        # blank panel.
+        if self.binsize.value() == self.binsize.minimum():
+            self._load_settings()
+
+        # Seeded once, from the feature backend the params declare. Doing it
+        # on every refresh would undo the checkbox the moment it was ticked,
+        # since ticking it refreshes.
+        if not self._seeded:
+            self._seeded = True
+            with self.quiet(self.scalogram):
+                self.scalogram.setChecked(
+                    self.session.params.get("features", {}).get("method")
+                    == "scalogram"
+                )
+
         self._build_viewers()
 
         self.end.setMaximum(float(recording.duration))

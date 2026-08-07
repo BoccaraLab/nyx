@@ -188,7 +188,9 @@ def test_warnings_reach_the_current_tab(scored_window):
 EXPECTED_PANELS = {
     "Signal check": {"EEG", "EEG spectrum"},
     "EMG threshold": {"EMG distribution", "EMG power", "wake / sleep"},
-    "Sleep stages": {"clusters and spectra", "components", "hypnogram"},
+    # The clustering only: the traces and the hypnogram belong to the tabs
+    # either side of it.
+    "Sleep stages": {"clusters and spectra", "other dimensions"},
     "Result": {"EEG", "EEG spectrum", "hypnogram"},
 }
 
@@ -263,6 +265,172 @@ def test_the_threshold_shows_on_both_the_distribution_and_the_trace(scored_windo
     assert all(
         float(line.value()) == pytest.approx(0.27) for line, _o in drawn
     )
+
+
+# ---------------------------------------------------------------------------
+# What the panels are actually set to
+# ---------------------------------------------------------------------------
+
+
+def tab_named(window, title):
+    tab = next(t for t in window.tabs if t.title == title)
+    window.rail.setCurrentRow(window.tabs.index(tab))
+    tab.safe_refresh()
+    return tab
+
+
+def test_the_spectrogram_uses_the_epoch_length_from_the_params(scored_window):
+    """ephyviewer's own default is 0.01 s -- one sample, and a blank panel."""
+    tab = tab_named(scored_window, "Signal check")
+
+    viewer = tab.docks.panel("EEG spectrum")
+    binsize = viewer.params["scalogram", "binsize"]
+
+    assert binsize == pytest.approx(
+        scored_window.session.params["EEG"]["binsize"]
+    )
+
+
+def test_the_wavelet_view_can_be_switched_on(scored_window):
+    from nyx.gui.viewers import NyxSpectrogramViewer, NyxTimeFreqViewer
+
+    tab = tab_named(scored_window, "Signal check")
+    assert isinstance(tab.docks.panel("EEG spectrum"), NyxSpectrogramViewer)
+
+    tab.scalogram.setChecked(True)
+
+    assert isinstance(tab.docks.panel("EEG spectrum"), NyxTimeFreqViewer)
+
+
+def test_the_view_settings_can_be_written_into_the_params(scored_window):
+    tab = tab_named(scored_window, "Signal check")
+
+    tab.binsize.setValue(8.0)
+    tab._apply_settings()
+
+    assert scored_window.session.params["EEG"]["binsize"] == pytest.approx(8.0)
+
+
+def test_the_wake_sleep_panel_is_editable_and_in_nyxs_colours(scored_window):
+    from nyx.gui.viewers import NyxEpochEncoder
+    from nyx.stages import COLORS
+
+    tab = tab_named(scored_window, "EMG threshold")
+    panel = tab.docks.panel("wake / sleep")
+
+    assert isinstance(panel, NyxEpochEncoder)
+    colours = dict(zip(panel.source.possible_labels, panel.source.color_labels,
+                       strict=True))
+    for label in ("WAKE", "SLEEP"):
+        if label in colours:
+            assert colours[label] == COLORS[label]
+
+
+def test_the_emg_power_trace_is_not_left_to_auto_scale(scored_window):
+    tab = tab_named(scored_window, "EMG threshold")
+    power = tab.docks.panel("EMG power")
+
+    # The power is min-max scaled to [0, 1] and its tails run to the edges,
+    # so auto-scaling leaves the interesting part in a sliver.
+    assert power.params["ylim_min"] == pytest.approx(-0.01)
+    assert power.params["ylim_max"] == pytest.approx(1.01)
+
+
+def test_the_emg_tab_has_a_confirm_button(scored_window):
+    tab = tab_named(scored_window, "EMG threshold")
+
+    assert "onfirm" in tab.confirm.text()
+
+
+def test_the_sleep_tab_shows_only_the_clustering(scored_window):
+    tab = tab_named(scored_window, "Sleep stages")
+
+    # The traces and the hypnogram belong to the tabs either side; here they
+    # only compete for width with the scatter being read.
+    assert not {"EEG", "hypnogram", "components"} & set(tab.docks.viewers)
+
+
+def test_the_matplotlib_panels_match_the_ephyviewer_ones(scored_window):
+    tab = tab_named(scored_window, "Sleep stages")
+
+    figure = tab.clusters_panel.view.figure
+    assert figure is not None
+    assert figure.patch.get_facecolor()[:3] != (1.0, 1.0, 1.0)
+
+
+def test_epochs_can_be_assigned_by_hand(scored, scored_window):
+    import numpy as np
+
+    clusters = scored.clusters()
+    mask = np.zeros(clusters.features_scaled.shape[0], dtype=bool)
+    mask[:40] = True
+
+    assigned = scored.assign_epochs(mask, "REM")
+    scored.compute(Stage.STEPS)
+
+    assert assigned == 40
+    assert "REM" in set(scored.staging().hypnogram["label"])
+    # A scoring a human touched must not claim to be automatic.
+    assert "manual_epochs" in scored.to_run_config().decisions
+
+
+def test_clearing_hand_assignments_puts_the_clustering_back(scored):
+    import numpy as np
+
+    before = list(scored.staging().hypnogram["label"])
+    mask = np.zeros(scored.clusters().features_scaled.shape[0], dtype=bool)
+    mask[:40] = True
+    scored.assign_epochs(mask, "WAKE")
+    scored.compute(Stage.STEPS)
+
+    scored.clear_manual_epochs()
+    scored.compute(Stage.STEPS)
+
+    assert list(scored.staging().hypnogram["label"]) == before
+
+
+def test_the_result_tab_hides_the_reference_until_asked(scored_window):
+    tab = tab_named(scored_window, "Result")
+
+    assert "reference" not in tab.docks.viewers
+
+    tab.show_reference.setChecked(True)
+
+    assert "reference" in tab.docks.viewers
+
+
+def test_the_reference_cannot_be_edited(scored_window):
+    from ephyviewer import EpochViewer
+
+    tab = tab_named(scored_window, "Result")
+    tab.show_reference.setChecked(True)
+
+    # A viewer, not an encoder: editing the thing you are comparing against
+    # would make the comparison meaningless.
+    assert isinstance(tab.docks.panel("reference"), EpochViewer)
+
+
+def test_the_summary_figures_wait_until_you_save(scored_window, tmp_path):
+    tab = tab_named(scored_window, "Result")
+
+    assert not {"confusion", "summary"} & set(tab.docks.viewers)
+
+    tab.output.setText(str(tmp_path))
+    tab._save()
+
+    assert "summary" in tab.docks.viewers
+
+
+def test_the_components_are_shown_and_told_apart(scored_window):
+    tab = tab_named(scored_window, "Result")
+    components = tab.docks.panel("components")
+
+    assert components is not None
+    colours = [
+        components.by_channel_params[f"ch{i}", "color"].name()
+        for i in range(components.source.nb_channel)
+    ]
+    assert len(set(colours)) == len(colours)
 
 
 # ---------------------------------------------------------------------------

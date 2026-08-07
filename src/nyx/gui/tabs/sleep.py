@@ -18,9 +18,9 @@ side is usually right for the scatter and the spectra.
 
 from __future__ import annotations
 
-from ephyviewer import EpochViewer, TraceViewer
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (
 import nyx
 from nyx.gui.panels import MplPanel
 from nyx.gui.session import Stage
-from nyx.gui.sources import component_source, epoch_sources, trace_sources
 from nyx.gui.tabs.base import Tab
 from nyx.gui.widgets import ClusteringForm, PostprocessForm, StageTable
 from nyx.stages import STAGE_ROW_ORDER
@@ -118,6 +117,43 @@ class SleepTab(Tab):
         self.table.setMinimumHeight(160)
         naming_layout.addWidget(self.table)
 
+        manual_box = QGroupBox("Assign by hand")
+        manual_layout = QVBoxLayout(manual_box)
+        manual_note = QLabel(
+            "Draw round a group of points in the scatter and give it a stage. "
+            "For the cases clustering will not get on its own -- a REM cluster "
+            "that merged into NREM, say."
+        )
+        manual_note.setWordWrap(True)
+        manual_note.setStyleSheet("color: palette(mid);")
+        manual_layout.addWidget(manual_note)
+
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        self.lasso_stage = QComboBox()
+        self.lasso_stage.addItems(list(STAGE_ROW_ORDER))
+        self.lasso_stage.setCurrentText("REM")
+        row_layout.addWidget(self.lasso_stage, 1)
+        self.lasso = QPushButton("Lasso")
+        self.lasso.setCheckable(True)
+        self.lasso.setToolTip(
+            "Click points in the scatter to trace a polygon; press enter or "
+            "space to close it. Escape starts over."
+        )
+        self.lasso.toggled.connect(self._toggle_lasso)
+        row_layout.addWidget(self.lasso)
+        manual_layout.addWidget(row)
+
+        clear_manual = QPushButton("Clear hand assignments")
+        clear_manual.clicked.connect(self._clear_manual)
+        manual_layout.addWidget(clear_manual)
+
+        self.manual_note = QLabel()
+        self.manual_note.setWordWrap(True)
+        self.manual_note.setStyleSheet("color: palette(mid);")
+        manual_layout.addWidget(self.manual_note)
+
         self.use_postprocess = QCheckBox("apply the postprocessing rules")
         self.use_postprocess.setToolTip(
             "Rules trade agreement for plausibility. They are off unless the "
@@ -128,7 +164,7 @@ class SleepTab(Tab):
         self.postprocess.changed.connect(self._rename)
 
         return [
-            pca_box, self.clustering, recluster, naming_box,
+            pca_box, self.clustering, recluster, naming_box, manual_box,
             self.use_postprocess, self.postprocess,
         ]
 
@@ -163,34 +199,77 @@ class SleepTab(Tab):
         self.docks.clear()
         self._built_for = key
 
-        eeg, _emg, offset = trace_sources(self.session.windowed())
-
+        # Clustering panels only. The traces and the hypnogram belong to the
+        # tabs either side of this one; here they are just competing for width
+        # with the scatter you are actually reading.
         self.docks.add(self.clusters_panel)
         self.docks.add(self.features_panel, tabify_with="clusters and spectra")
         self.docks.add(self.pca_panel, tabify_with="other dimensions")
 
-        components = component_source(self.session.pca(), n=4, t_offset=offset)
-        if components is not None:
-            self.docks.add(TraceViewer(source=components, name="components"),
-                           location="bottom")
-        self.docks.add(TraceViewer(source=eeg, name="EEG"), location="bottom")
-        self._add_hypnogram(offset)
+    # -- assigning by hand -------------------------------------------------
 
-    def _add_hypnogram(self, offset: float) -> None:
-        named = [("nyx", self.session.staging().hypnogram)]
-        if self.session.reference is not None:
-            from nyx.metrics import normalise_labels
+    def _toggle_lasso(self, on: bool) -> None:
+        """Draw a polygon on the cluster scatter and name what falls inside.
 
-            named.append(("reference", normalise_labels(self.session.reference)))
+        Uses the same :class:`~nyx.interactive.PolygonSelector` the notebooks
+        use, on the same axes -- so what you learn in one place works in the
+        other.
+        """
+        if not on:
+            self._finish_lasso()
+            return
 
-        source = epoch_sources(named, offset)
-        panel = self.docks.panel("hypnogram")
-        if panel is not None:
-            panel.source = source
-            panel.refresh()
-        else:
-            self.docks.add(EpochViewer(source=source, name="hypnogram"),
-                           location="bottom")
+        if not self.session.has(Stage.STEPS):
+            self.lasso.setChecked(False)
+            return
+
+        figure = self.clusters_panel.view.figure
+        if figure is None or not figure.axes:
+            self.lasso.setChecked(False)
+            self.status.emit("Cluster the epochs first.")
+            return
+
+        from nyx.interactive import PolygonSelector
+
+        clusters = self.session.clusters()
+        scatter_ax = figure.axes[0]          # plot_cluster_check draws it left
+        points = clusters.features_scaled[:, :2]
+
+        self._selector = PolygonSelector(scatter_ax, points, verbose=False)
+        self.manual_note.setText(
+            "Click to place vertices, enter or space to close, escape to "
+            "start over. Then press Lasso again."
+        )
+        self.status.emit("Draw round the points you want.")
+
+    def _finish_lasso(self) -> None:
+        selector = getattr(self, "_selector", None)
+        if selector is None:
+            return
+        if not selector.finished:
+            selector.finish()
+
+        mask = selector.get_mask()
+        self._selector = None
+        if not mask.any():
+            self.manual_note.setText("Nothing was selected.")
+            return
+
+        stage = self.lasso_stage.currentText()
+        count = self.session.assign_epochs(mask, stage)
+        self.manual_note.setText(
+            f"{count} epochs assigned to {stage} by hand."
+        )
+        self.status.emit(f"{count} epochs -> {stage}.")
+        self._redraw_figures()
+        self._fill_table()
+
+    def _clear_manual(self) -> None:
+        self.session.clear_manual_epochs()
+        self.manual_note.setText("")
+        self._redraw_figures()
+        self._fill_table()
+        self.status.emit("Hand assignments cleared.")
 
     # -- actions -----------------------------------------------------------
 
@@ -216,9 +295,6 @@ class SleepTab(Tab):
             self.postprocess.rules() if self.use_postprocess.isChecked() else []
         )
         self.session.compute(Stage.STEPS)
-
-        _eeg, _emg, offset = trace_sources(self.session.windowed())
-        self._add_hypnogram(offset)
         self._redraw_figures()
         self._fill_table()
 

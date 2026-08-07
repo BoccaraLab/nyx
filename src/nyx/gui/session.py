@@ -119,6 +119,9 @@ class ScoringSession:
 
         self._steps: list[Step] = []
         self._postprocess: list | None = None
+        #: step index -> {position in the clustered epochs: stage}. Hand
+        #: assignments, applied after the cluster names.
+        self._manual_epochs: dict[int, dict[int, str]] = {}
         self._edited_hypnogram: dict | None = None
         self._edit_note: dict[str, Any] = {}
 
@@ -266,6 +269,46 @@ class ScoringSession:
             ),
         )
         self._invalidate_step(index, keep_pca=True, keep_clusters=True)
+
+    def assign_epochs(self, mask, stage: str, step: int = -1) -> int:
+        """Name individual epochs by hand, overriding what clustering decided.
+
+        ``mask`` is over the clustered epochs, in the order
+        :attr:`SleepClusters.features_scaled` holds them -- which is what a
+        polygon drawn on the cluster scatter selects.
+
+        This is the escape hatch for the cases clustering will not get on its
+        own: a REM cluster that merged into NREM, an artefact lobe that should
+        be NOSIGNAL. It is applied *after* the cluster names, so it survives
+        renaming, and it is recorded in the run config, since a scoring a human
+        edited must not claim to be automatic.
+
+        Returns how many epochs it touched.
+        """
+        import numpy as np
+
+        index = self._step_index(step)
+        mask = np.asarray(mask, dtype=bool)
+
+        overrides = dict(self._manual_epochs.get(index, {}))
+        for position in np.nonzero(mask)[0]:
+            overrides[int(position)] = str(stage)
+        self._manual_epochs[index] = overrides
+
+        self._invalidate_step(index, keep_pca=True, keep_clusters=True)
+        return int(mask.sum())
+
+    def clear_manual_epochs(self, step: int | None = None) -> None:
+        """Forget hand assignments, for one step or all of them."""
+        if step is None:
+            self._manual_epochs = {}
+        else:
+            self._manual_epochs.pop(self._step_index(step), None)
+        if self._steps:
+            self._invalidate_step(0, keep_pca=True, keep_clusters=True)
+
+    def manual_epochs(self, step: int = -1) -> dict[int, str]:
+        return dict(self._manual_epochs.get(self._step_index(step), {}))
 
     def set_refinements(self, refinements: Sequence | None, step: int = -1) -> None:
         index = self._step_index(step)
@@ -661,8 +704,40 @@ class ScoringSession:
             outcome = label_clusters(
                 step, hypnogram, self._pcas[index], self._clusters[index]
             )
+            outcome = self._apply_manual(index, outcome)
             self._outcomes.append(outcome)
             hypnogram = outcome.hypnogram
+
+    def _apply_manual(self, index: int, outcome: StepOutcome) -> StepOutcome:
+        """Overwrite the epochs a human named, after the clusters were named.
+
+        The mask the caller gave is over the *clustered* epochs; the outcome's
+        labels are over the whole epoch grid. The PCA's non-NaN rows are
+        exactly the epochs this step covered, in order, which is the same
+        correspondence :func:`nyx.steps.label_clusters` relies on to write its
+        own labels back.
+        """
+        overrides = self._manual_epochs.get(index)
+        if not overrides:
+            return outcome
+
+        from nyx.io.annotations import intervals_from_labels
+
+        pca = self._pcas[index]
+        covered = np.nonzero(~np.any(np.isnan(pca.signal), axis=1))[0]
+        valid = self._clusters[index].valid_mask
+        selectable = covered[np.asarray(valid, dtype=bool)] if len(valid) else covered
+
+        labels = np.array(outcome.labels, copy=True)
+        for position, stage in overrides.items():
+            if 0 <= position < len(selectable):
+                labels[selectable[position]] = stage
+
+        return replace(
+            outcome,
+            labels=labels,
+            hypnogram=intervals_from_labels(labels, 1.0 / pca.fs),
+        )
 
     def compute_through(
         self, stage: Stage, should_stop: Callable[[], bool] | None = None
@@ -720,6 +795,12 @@ class ScoringSession:
             decisions["nosignal_threshold"] = float(self.nosignal_threshold())
         if self._edit_note:
             decisions["manual_edit"] = dict(self._edit_note)
+        if any(self._manual_epochs.values()):
+            decisions["manual_epochs"] = {
+                str(step): {str(k): v for k, v in overrides.items()}
+                for step, overrides in self._manual_epochs.items()
+                if overrides
+            }
 
         return replace(
             config,

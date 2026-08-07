@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 
-from ephyviewer import EpochViewer, SpectrogramViewer, TraceViewer
+from ephyviewer import EpochViewer, TraceViewer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -27,15 +27,16 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QVBoxLayout,
     QWidget,
 )
 
 import nyx
 from nyx.gui.panels import MplPanel, TextPanel
 from nyx.gui.session import Stage
-from nyx.gui.sources import epoch_source, trace_sources
+from nyx.gui.sources import component_source, epoch_source, trace_sources
 from nyx.gui.tabs.base import Tab
-from nyx.gui.viewers import NyxTimeFreqViewer, timefreq_params_from
+from nyx.gui.viewers import make_timefreq_viewer
 
 __all__ = ["ResultTab"]
 
@@ -69,6 +70,21 @@ class ResultTab(Tab):
         )
         self.palette.currentTextChanged.connect(self._set_palette)
         view_form.addRow("colours", self.palette)
+
+        compare_box = QGroupBox("Compare")
+        compare_layout = QVBoxLayout(compare_box)
+        self.show_reference = QPushButton("Show the reference")
+        self.show_reference.setCheckable(True)
+        self.show_reference.setToolTip(
+            "Add the manual scoring as a second, read-only hypnogram, "
+            "tabbed with yours so you can flip between them in place."
+        )
+        self.show_reference.toggled.connect(self._toggle_reference)
+        compare_layout.addWidget(self.show_reference)
+        self.compare_note = QLabel()
+        self.compare_note.setWordWrap(True)
+        self.compare_note.setStyleSheet("color: palette(mid);")
+        compare_layout.addWidget(self.compare_note)
 
         edit_box = QGroupBox("Editing")
         edit_layout = QFormLayout(edit_box)
@@ -119,9 +135,12 @@ class ResultTab(Tab):
         save.clicked.connect(self._save)
         save_form.addRow("", save)
 
-        return [view_box, edit_box, save_box]
+        return [view_box, compare_box, edit_box, save_box]
 
     def build_docks(self) -> None:
+        # The confusion matrix and the nine-panel summary are built here but
+        # not docked: they are what you look at once, at the end, so they
+        # appear when you save rather than competing for width before then.
         self.agreement = TextPanel(
             "agreement",
             placeholder="No manual scoring was loaded, so there is nothing to "
@@ -158,14 +177,10 @@ class ResultTab(Tab):
         self.docks.add(TraceViewer(source=eeg, name="EEG"))
         self.docks.add(self._timefreq(eeg, "EEG spectrum", "EEG", params))
 
-        if result.reference is not None:
-            from nyx.metrics import normalise_labels
-
-            self.docks.add(EpochViewer(
-                source=epoch_source(
-                    normalise_labels(result.reference), "reference", offset
-                ),
-                name="reference",
+        components = component_source(self.session.pca(), n=4, t_offset=offset)
+        if components is not None:
+            self.docks.add(_coloured(
+                TraceViewer(source=components, name="components")
             ))
 
         self.epoch_source = NyxEpochSource(
@@ -177,22 +192,60 @@ class ResultTab(Tab):
             rules=self.session.postprocess_rules(),
         )
         self.docks.add(self.encoder)
-
         self.docks.add(self.agreement, location="right")
-        self.docks.add(self.confusion, tabify_with="agreement")
-        self.docks.add(self.summary, tabify_with="confusion")
+
+        if self.show_reference.isChecked():
+            self._add_reference(offset)
 
     def _timefreq(self, source, name: str, channel: str, params: dict):
-        if self.scalogram.isChecked():
-            viewer = NyxTimeFreqViewer(source=source, name=name)
-            viewer.apply_settings(timefreq_params_from(params, channel))
-        else:
-            viewer = SpectrogramViewer(source=source, name=name)
+        viewer = make_timefreq_viewer(
+            source, name, params, channel, self.scalogram.isChecked()
+        )
         try:
             viewer.params["colormap"] = self.palette.currentText()
         except Exception:  # noqa: BLE001
             pass
         return viewer
+
+    def _add_reference(self, offset: float) -> None:
+        """The manual scoring, read-only, tabbed with yours.
+
+        A viewer rather than an encoder: it is the thing being compared
+        against, and editing it would make the comparison meaningless.
+        """
+        from nyx.metrics import normalise_labels
+
+        reference = self.session.result().reference
+        if reference is None or "reference" in self.docks.viewers:
+            return
+        self.docks.add(
+            EpochViewer(
+                source=epoch_source(
+                    normalise_labels(reference), "reference", offset
+                ),
+                name="reference",
+            ),
+            tabify_with="hypnogram",
+        )
+
+    def _toggle_reference(self, on: bool) -> None:
+        if not self.session.has(Stage.STEPS):
+            return
+        if not on:
+            self.docks.remove("reference")
+            self.compare_note.setText("")
+            return
+
+        if self.session.result().reference is None:
+            self.compare_note.setText("No manual scoring was loaded.")
+            self.show_reference.setChecked(False)
+            return
+
+        _eeg, _emg, offset = trace_sources(self.session.result().recording)
+        self._add_reference(offset)
+        self.compare_note.setText(
+            "Tabbed with yours -- click the tab to flip between them."
+        )
 
     def _set_palette(self, name: str) -> None:
         for entry in self.docks.viewers.values():
@@ -251,6 +304,17 @@ class ResultTab(Tab):
         for name in sorted(os.listdir(written)):
             self.status.emit(f"  {name}")
 
+        self._show_final_figures()
+
+    def _show_final_figures(self) -> None:
+        """The look-at-it-once figures, docked now that the run is finished."""
+        result = self.session.result()
+        self.summary.set_figure(nyx.plot_summary(result))
+        self.docks.add(self.summary, tabify_with="agreement")
+        if result.agreement is not None:
+            self.confusion.set_figure(_confusion_figure(result))
+            self.docks.add(self.confusion, tabify_with="summary")
+
     # -- readouts ----------------------------------------------------------
 
     def _update_readouts(self) -> None:
@@ -264,12 +328,9 @@ class ResultTab(Tab):
             "color: #e37400;" if self.session.was_edited() else "color: palette(mid);"
         )
 
-        if result.agreement is not None:
-            self.agreement.set_text(result.agreement.summary())
-            self.confusion.set_figure(_confusion_figure(result))
-        else:
-            self.agreement.set_text("")
-        self.summary.set_figure(nyx.plot_summary(result))
+        self.agreement.set_text(
+            result.agreement.summary() if result.agreement is not None else ""
+        )
 
     def refresh(self) -> None:
         if not self.session.has(Stage.STEPS):
@@ -290,3 +351,19 @@ def _confusion_figure(result):
     figure, ax = plt.subplots(figsize=(5.5, 4.5), layout="constrained")
     nyx.report.plot_confusion(result, ax)
     return figure
+
+
+#: One colour per component, so PC1 and PC3 are told apart at a glance.
+PC_COLOURS = ["#4fc3f7", "#ffb74d", "#81c784", "#e57373", "#ba68c8", "#a1887f"]
+
+
+def _coloured(viewer):
+    """Give each component trace its own colour."""
+    try:
+        for i in range(viewer.source.nb_channel):
+            viewer.by_channel_params[f"ch{i}", "color"] = PC_COLOURS[
+                i % len(PC_COLOURS)
+            ]
+    except Exception:  # noqa: BLE001 - parameter names vary between releases
+        pass
+    return viewer

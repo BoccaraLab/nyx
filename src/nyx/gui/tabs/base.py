@@ -77,18 +77,11 @@ class Tab(QWidget):
         split = QSplitter(Qt.Horizontal)
         outer.addWidget(split, 1)
 
-        # -- controls, with the run button at the top where it can be seen
+        # -- controls: scrollable, with the run button pinned below them so it
+        #    stays put however far the settings are scrolled.
         column = QWidget()
         self._column = QVBoxLayout(column)
         self._column.setContentsMargins(0, 0, 8, 0)
-
-        self.run_button = QPushButton(self.run_label)
-        self.run_button.setMinimumHeight(32)
-        self.run_button.setStyleSheet("font-weight: bold;")
-        self.run_button.clicked.connect(lambda: self.run_requested.emit(self.stage))
-        if not self.needs_worker:
-            self.run_button.hide()
-        self._column.addWidget(self.run_button)
 
         for widget in self.build_controls() or []:
             if isinstance(widget, QWidget):
@@ -102,8 +95,22 @@ class Tab(QWidget):
         area.setWidget(column)
         area.setFrameShape(QScrollArea.NoFrame)
         area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        area.setMinimumWidth(self.controls_width)
-        split.addWidget(area)
+
+        self.run_button = QPushButton(self.run_label)
+        self.run_button.setMinimumHeight(34)
+        self.run_button.setStyleSheet("font-weight: bold;")
+        self.run_button.clicked.connect(lambda: self.run_requested.emit(self.stage))
+        if not self.needs_worker:
+            self.run_button.hide()
+
+        side = QWidget()
+        side_layout = QVBoxLayout(side)
+        side_layout.setContentsMargins(0, 0, 0, 0)
+        side_layout.setSpacing(6)
+        side_layout.addWidget(area, 1)
+        side_layout.addWidget(self.run_button)
+        side.setMinimumWidth(self.controls_width)
+        split.addWidget(side)
 
         # -- panels
         self.docks = DockHost()
