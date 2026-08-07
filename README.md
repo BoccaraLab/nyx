@@ -1,10 +1,10 @@
 <img src="src/nyx/gui/resources/nyx_logo.png" alt="nyx" width="180">
 
-# nyx
+# Nyx
 
 A flexible framework for sleep scoring across species, lifespan and modalities.
 
-nyx separates wake from sleep using EMG power, then splits sleep into stages by
+Nyx separates wake from sleep using EMG power, then splits sleep into stages by
 clustering a PCA of the EEG spectrogram. It needs **no training data and no
 manually scored examples** — which is what lets it work on species that have no
 scoring standard, and on recordings nobody has scored yet.
@@ -13,7 +13,7 @@ Rodent scoring (Wake/NREM/REM) and human scoring (five stages) are the same
 code. They differ in how many clustering steps run, which is configuration, not
 a different pipeline.
 
-If you use nyx, please cite the [preprint](https://www.biorxiv.org/content/10.64898/2026.07.24.740558v1).
+If you use Nyx, please cite the [preprint](https://www.biorxiv.org/content/10.64898/2026.07.24.740558v1).
 
 ---
 
@@ -61,8 +61,8 @@ print(result.agreement.summary())
 ```
 
 Good for checking an installation and for following the tutorial. **Not** a
-measure of how well nyx works — the signal is synthesised to contain exactly
-the structure nyx looks for, so it scores near-perfectly by construction. Real
+measure of how well Nyx works — the signal is synthesised to contain exactly
+the structure Nyx looks for, so it scores near-perfectly by construction. Real
 EEG is far messier. For an honest assessment, run one of the public datasets
 below.
 
@@ -200,7 +200,7 @@ Mains interference is measured rather than eyeballed —
 
 ## Four decisions are yours
 
-nyx is not a black box, and four points in it are genuine judgement calls. Each
+Nyx is not a black box, and four points in it are genuine judgement calls. Each
 has an automatic default and an explicit override:
 
 | decision | default | override |
@@ -218,7 +218,7 @@ per-cluster spectra, and tune. The defaults are reasonable, not optimal.
 
 ## Your own data
 
-nyx reads recordings by **format**, not by dataset, so using it on new data
+Nyx reads recordings by **format**, not by dataset, so using it on new data
 needs no code:
 
 | recordings | annotations |
@@ -248,7 +248,7 @@ Muscle is volume-conducted, so it appears on every electrode at once while
 brain activity stays local. Band-passing 275–600 Hz and measuring how much the
 channels agree recovers a usable tone signal. Failing that,
 `emg_channel=None` with `mouse_no_emg` params scores from the EEG alone —
-nyx will warn, and you should check the per-cluster spectra every time.
+Nyx will warn, and you should check the per-cluster spectra every time.
 
 ### Many recordings
 
@@ -384,17 +384,12 @@ flexible framework for sleep scoring across species, lifespan and modalities.*
 bioRxiv 2026. doi:[10.64898/2026.07.24.740558](https://doi.org/10.64898/2026.07.24.740558)
 
 Machine-readable metadata is in [`CITATION.cff`](CITATION.cff); contributors are
-listed in [`AUTHORS.md`](AUTHORS.md). The analyses in the paper live in a
-separate repository, pinned to a specific nyx version.
+listed in [`AUTHORS.md`](AUTHORS.md).
 
 ## Licence
+
+Copyright © C. Boccara Lab.
 
 GNU Lesser General Public License v3.0 or later — see [`LICENSE`](LICENSE),
 which incorporates the [GPL-3.0](https://www.gnu.org/licenses/gpl-3.0.txt) by
 reference.
-
-In short: use nyx freely, including inside closed-source software and
-commercially. But if you modify nyx **itself** and distribute the result, those
-modifications have to be published under the same licence. The intent is that
-improvements to the scoring method come back to the community rather than being
-kept private.

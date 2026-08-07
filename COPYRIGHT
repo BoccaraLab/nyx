@@ -1,0 +1,32 @@
+nyx -- a flexible framework for sleep scoring across species, lifespan and
+modalities.
+
+Copyright © C. Boccara Lab.
+
+Licensed under the GNU Lesser General Public License, version 3 or (at your
+option) any later version. The full text is in LICENSE, which incorporates the
+GNU General Public License version 3 by reference.
+
+nyx is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the licence for details.
+
+
+Who wrote it
+------------
+
+Authorship, and who did what, is in AUTHORS.md and in the author contribution
+statement of the paper. The copyright above is held by the lab rather than by
+the individual authors, which is the usual arrangement for work done there.
+
+
+Third-party components
+----------------------
+
+nyx depends on, but does not include, the packages named in pyproject.toml.
+Each carries its own licence.
+
+The Morlet wavelet code in src/nyx/features.py and the time-frequency viewer in
+src/nyx/gui/viewers.py are derived from ephyviewer (NeuralEnsemble), which is
+distributed under the MIT licence. Those files say so where the derivation
+happens.

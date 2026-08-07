@@ -711,11 +711,91 @@ def test_the_time_frequency_views_start_on_jet(scored_window, wavelet):
     assert tab.docks.panel("EEG spectrum").params["colormap"] == "jet"
 
 
-def test_the_toolbars_are_readable_against_the_dark_panels(scored_window):
-    # ephyviewer ships dark icons drawn for a light theme; on a dark one they
-    # are black on near-black.
+def icon_lightness(icon, size=32):
+    """Mean lightness of an icon's opaque pixels, 0 (black) to 255 (white)."""
+    from PySide6.QtGui import QImage
+
+    pixmap = icon.pixmap(size, size)
+    image = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
+    buffer = np.frombuffer(image.constBits(), dtype=np.uint8)
+    buffer = buffer.reshape(
+        image.height(), image.bytesPerLine() // 4, 4
+    )[:, : image.width()]
+    opaque = buffer[..., 3] > 40
+    return None if not opaque.any() else float(buffer[..., :3][opaque].mean())
+
+
+@pytest.fixture
+def dark(qtbot, monkeypatch):
+    """Pretend the theme is dark, which is when the icons are a problem."""
+    from PySide6.QtGui import QColor, QPalette
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    before = app.palette()
+    palette = QPalette(before)
+    palette.setColor(QPalette.Window, QColor("#1e1e1e"))
+    app.setPalette(palette)
+    yield
+    app.setPalette(before)
+
+
+def test_the_icons_are_lightened_on_a_dark_theme(dark, windows, scored):
+    """ephyviewer's icons are dark line art drawn for a light theme.
+
+    On a dark one the play and stop buttons, the encoder's save and undo, and
+    the split and reorder buttons in the epoch table are black on near-black.
+    """
+    from PySide6.QtWidgets import QAbstractButton
+
+    window = windows(scored)
+    tab = tab_named(window, "EMG threshold")
+    encoder = tab.docks.panel("wake / sleep")
+
+    # play and stop -- plain buttons on a QWidget, not a toolbar
+    for button in tab.docks.navigation_toolbar.findChildren(QAbstractButton):
+        if not button.icon().isNull():
+            assert icon_lightness(button.icon()) > 150
+
+    # save, undo, redo -- actions on the encoder's toolbar
+    for action in encoder.toolbar.actions():
+        if not action.icon().isNull():
+            assert icon_lightness(action.icon()) > 150
+
+    # seek, split, duplicate, delete -- on QTableWidgetItems, which
+    # findChildren cannot reach, so they are lightened at their source
+    for icon in encoder.table_widget_icons.values():
+        assert icon_lightness(icon) > 150
+
+
+def test_the_panels_themselves_stay_dark(scored_window):
+    """The icons are recoloured, not the bars they sit in.
+
+    Lightening the bars works, and cuts a pale stripe across an otherwise dark
+    window.
+    """
     for tab in scored_window.tabs:
-        assert "QToolBar" in tab.docks.styleSheet()
+        assert tab.docks.styleSheet() == ""
+        assert tab.docks.navigation_toolbar.styleSheet() == ""
+
+
+def test_lightening_twice_does_not_put_them_back(dark, windows, scored):
+    from PySide6.QtWidgets import QAbstractButton
+
+    from nyx.gui.panels import brighten_icons
+
+    window = windows(scored)
+    tab = tab_named(window, "EMG threshold")
+    button = next(
+        b for b in tab.docks.navigation_toolbar.findChildren(QAbstractButton)
+        if not b.icon().isNull()
+    )
+    before = icon_lightness(button.icon())
+
+    brighten_icons(tab.docks)
+
+    # Inverting an inverted icon gives the dark original back.
+    assert icon_lightness(button.icon()) == pytest.approx(before)
 
 
 def test_clearing_hand_assignments_takes_the_drawing_away(scored_window):

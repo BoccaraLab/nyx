@@ -27,22 +27,91 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from nyx.gui.canvas import FigureView, PanelCanvas
 
-__all__ = ["DockHost", "MplPanel", "TextPanel", "TOOLBAR_STYLE"]
+__all__ = [
+    "DockHost", "MplPanel", "TextPanel", "brighten_icons", "lighten_icon_map",
+]
 
-#: ephyviewer ships dark icons drawn for a light theme. On a dark one they are
-#: black on near-black and effectively invisible, so the bars they sit in are
-#: given a light background rather than the icons being redrawn.
-TOOLBAR_STYLE = """
-QToolBar { background: #d9d9dd; border: none; spacing: 2px; }
-QToolBar QToolButton { background: #d9d9dd; color: #202020; padding: 2px; }
-QToolBar QToolButton:hover { background: #b9c4d6; }
-QToolBar QToolButton:checked { background: #a8b6cc; }
-QToolBar QPushButton { background: #e6e6ea; color: #202020;
-                       border: 1px solid #a8a8b0; border-radius: 3px;
-                       padding: 2px 8px; }
-QToolBar QPushButton:hover { background: #cfd8e6; }
-QToolBar QLabel { color: #202020; }
-"""
+#: Marks a widget whose icons have already been lightened, so a panel that is
+#: refreshed twice does not get inverted back to dark.
+_DONE = "_nyx_icons_lightened"
+
+
+def _is_dark(widget) -> bool:
+    """Whether the theme this widget is drawn in is a dark one."""
+    return widget.palette().window().color().lightness() < 128
+
+
+def _lightened(icon, size: int = 32):
+    """The same icon, drawn light instead of dark.
+
+    ephyviewer's icons are dark line art on transparent, drawn for a light
+    theme. Inverting the colour channels and leaving alpha alone turns them
+    into light line art on transparent, which is what a dark theme needs.
+    """
+    from PySide6.QtGui import QIcon, QImage, QPixmap
+
+    pixmap = icon.pixmap(size, size)
+    if pixmap.isNull():
+        return None
+    image = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
+    image.invertPixels(QImage.InvertRgb)   # RGB only; the alpha stays put
+    return QIcon(QPixmap.fromImage(image))
+
+
+def brighten_icons(widget) -> None:
+    """Make a viewer's icons visible on a dark background.
+
+    ephyviewer ships dark icons, so on a dark theme the play and stop buttons,
+    the epoch encoder's save and undo, and the split and reorder buttons are
+    black on near-black.
+
+    The icons are recoloured rather than the bars they sit in being given a
+    light background: the bars are part of the panel, and lightening them cuts
+    a pale stripe across an otherwise dark window.
+
+    Does nothing on a light theme, where the icons were already right, and
+    nothing twice to the same widget.
+    """
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QAbstractButton
+
+    if widget is None or not _is_dark(widget):
+        return
+
+    for button in widget.findChildren(QAbstractButton):
+        if button.property(_DONE) or button.icon().isNull():
+            continue
+        lightened = _lightened(button.icon())
+        if lightened is not None:
+            button.setIcon(lightened)
+            button.setProperty(_DONE, True)
+
+    for action in widget.findChildren(QAction):
+        if action.property(_DONE) or action.icon().isNull():
+            continue
+        lightened = _lightened(action.icon())
+        if lightened is not None:
+            action.setIcon(lightened)
+            action.setProperty(_DONE, True)
+
+
+def lighten_icon_map(widget, icons: dict | None) -> None:
+    """Lighten a dict of icons a widget draws from, in place.
+
+    For icons that never reach a widget of their own -- the epoch table's seek,
+    split, duplicate and delete are put on ``QTableWidgetItem``s, which
+    ``findChildren`` cannot see. The table is rebuilt from this dict on every
+    refresh, so replacing its contents covers every row that will ever exist.
+    """
+    if not icons or widget is None or not _is_dark(widget):
+        return
+    if widget.property(_DONE + "_map"):
+        return
+    for name, icon in list(icons.items()):
+        lightened = _lightened(icon)
+        if lightened is not None:
+            icons[name] = lightened
+    widget.setProperty(_DONE + "_map", True)
 
 
 class DockHost(MainViewer):
@@ -61,7 +130,8 @@ class DockHost(MainViewer):
         self.setDockNestingEnabled(True)
         # Embedded, so it must behave as a widget rather than a window.
         self.setWindowFlags(Qt.Widget)
-        self.setStyleSheet(TOOLBAR_STYLE)
+        # The navigation bar's play and stop, before any panel is added.
+        brighten_icons(self)
 
     # -- contents ----------------------------------------------------------
 
@@ -77,6 +147,8 @@ class DockHost(MainViewer):
         # well as stopping its threads. Re-adding the same object has to undo
         # that or the dock comes back empty.
         widget.show()
+        # After adding, so the panel's own toolbar and controls exist.
+        brighten_icons(widget)
         return widget
 
     def remove(self, name: str) -> None:

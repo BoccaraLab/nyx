@@ -480,6 +480,15 @@ class NyxEpochEncoder(EpochEncoder):
         except Exception:  # noqa: BLE001
             pass
 
+        # The seek, split, duplicate and delete icons in the epoch table are
+        # on QTableWidgetItems rather than on buttons, so walking the widget
+        # tree never finds them. They all come from this one dict, and the
+        # table is rebuilt from it on every refresh -- so lightening it here
+        # covers every row that will ever be drawn.
+        from nyx.gui.panels import lighten_icon_map
+
+        lighten_icon_map(self, getattr(self, "table_widget_icons", None))
+
     # -- setup -------------------------------------------------------------
 
     def _add_navigation(self) -> None:

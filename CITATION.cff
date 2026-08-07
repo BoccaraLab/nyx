@@ -3,6 +3,7 @@ title: "Nyx: a flexible framework for sleep scoring across species, lifespan and
 message: "If you use this software, please cite the preprint below."
 type: software
 license: LGPL-3.0-or-later
+copyright: "Copyright © C. Boccara Lab."
 version: 0.1.0
 date-released: "2026-08-04"
 
