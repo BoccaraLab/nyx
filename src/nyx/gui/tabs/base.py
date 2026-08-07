@@ -48,6 +48,12 @@ class Tab(QWidget):
     #: Whether the work is slow enough to need a worker and a button.
     needs_worker = True
     run_label = "Run"
+    #: Where the run button goes. A button that has to be pressed *before*
+    #: anything else on the tab means anything -- computing the EMG features,
+    #: recomputing the PCA -- belongs at the top, where it reads as the first
+    #: thing to do. A button that applies what you have set and moves on
+    #: belongs at the bottom, after the settings it applies.
+    run_at_top = False
     #: Width of the controls column.
     controls_width = 330
 
@@ -107,8 +113,12 @@ class Tab(QWidget):
         side_layout = QVBoxLayout(side)
         side_layout.setContentsMargins(0, 0, 0, 0)
         side_layout.setSpacing(6)
-        side_layout.addWidget(area, 1)
-        side_layout.addWidget(self.run_button)
+        if self.run_at_top:
+            side_layout.addWidget(self.run_button)
+            side_layout.addWidget(area, 1)
+        else:
+            side_layout.addWidget(area, 1)
+            side_layout.addWidget(self.run_button)
         side.setMinimumWidth(self.controls_width)
         split.addWidget(side)
 

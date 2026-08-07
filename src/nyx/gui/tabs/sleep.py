@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -54,6 +53,7 @@ class SleepTab(Tab):
         "theta peak around 6-9 Hz. Name them in the table -- renaming never "
         "re-clusters, so changing your mind is free."
     )
+    run_at_top = True
     stage = Stage.STEPS
     run_label = "Recompute the PCA"
     controls_width = 360
@@ -92,25 +92,13 @@ class SleepTab(Tab):
 
         naming_box = QGroupBox("Names")
         naming_layout = QVBoxLayout(naming_box)
-        naming_form = QFormLayout()
-        self.stage_order = QLineEdit()
-        self.stage_order.setPlaceholderText("REM, NREM")
-        self.stage_order.setToolTip(
-            "Stage names in cluster order, lowest centroid first. The table "
-            "overrides this per cluster."
+        naming_note = QLabel(
+            "One row per cluster, in centroid order. Name them here -- "
+            "renaming never re-clusters, so changing your mind is free."
         )
-        self.stage_order.editingFinished.connect(self._rename)
-        flip = QPushButton("Flip")
-        flip.setToolTip("Reverse the order -- the usual fix when REM and NREM swap.")
-        flip.clicked.connect(self._flip)
-
-        order_row = QWidget()
-        order_layout = QHBoxLayout(order_row)
-        order_layout.setContentsMargins(0, 0, 0, 0)
-        order_layout.addWidget(self.stage_order, 1)
-        order_layout.addWidget(flip)
-        naming_form.addRow("order", order_row)
-        naming_layout.addLayout(naming_form)
+        naming_note.setWordWrap(True)
+        naming_note.setStyleSheet("color: palette(mid);")
+        naming_layout.addWidget(naming_note)
 
         self.table = StageTable()
         self.table.changed.connect(self._rename)
@@ -274,27 +262,37 @@ class SleepTab(Tab):
     # -- actions -----------------------------------------------------------
 
     def _recluster(self) -> None:
+        """Recluster with the current settings, forgetting the old names.
+
+        Cluster ids only mean anything relative to a particular clustering, so
+        carrying a mapping across a change in the number of clusters is how you
+        end up naming a cluster that no longer exists.
+        """
+        self.session.set_cluster_overrides(None)
         self.session.set_clustering(self.clustering.values())
         self.run_requested.emit(Stage.STEPS)
 
-    def _flip(self) -> None:
-        names = _split(self.stage_order.text())
-        self.stage_order.setText(", ".join(reversed(names)))
-        self._rename()
-
     def _rename(self) -> None:
-        """Rename and re-apply the rules. Instant -- nothing is re-clustered."""
+        """Rename and re-apply the rules. Instant -- nothing is re-clustered.
+
+        The table is the only thing that names clusters. It has exactly one row
+        per cluster, so it cannot get out of step with the clustering the way a
+        typed list of names could -- which is what used to break when the
+        cluster count changed and the names had not been decided yet.
+        """
         if not self.session.has(Stage.STEPS):
             return
 
-        names = _split(self.stage_order.text())
-        if names:
-            self.session.set_stage_order(names)
-        self.session.set_cluster_overrides(self.table.overrides() or None)
-        self.session.set_postprocess(
-            self.postprocess.rules() if self.use_postprocess.isChecked() else []
-        )
-        self.session.compute(Stage.STEPS)
+        try:
+            self.session.set_cluster_overrides(self.table.overrides() or None)
+            self.session.set_postprocess(
+                self.postprocess.rules() if self.use_postprocess.isChecked() else []
+            )
+            self.session.compute(Stage.STEPS)
+        except Exception as exc:  # noqa: BLE001 - reported, never fatal
+            self.show_warnings([f"Could not apply those names: {exc}"])
+            return
+
         self._redraw_figures()
         self._fill_table()
 
@@ -323,11 +321,6 @@ class SleepTab(Tab):
                     {**resolve_clustering_params(self.session.params),
                      **step.clustering_params()}
                 )
-            if not self.stage_order.text().strip():
-                with self.quiet(self.stage_order):
-                    self.stage_order.setText(
-                        ", ".join(step.stage_order or ["REM", "NREM"])
-                    )
 
         rules = self.session.postprocess_rules()
         with self.quiet(self.use_postprocess):
@@ -374,16 +367,24 @@ class SleepTab(Tab):
         self.variance.setText(text)
 
     def _fill_table(self) -> None:
+        """One row per cluster, pre-filled with a plausible name.
+
+        A freshly reclustered run has no mapping yet, so the rows are seeded
+        from the step's declared stage order by position -- and any cluster
+        beyond that order is left UNCLASSIFIED rather than silently folded into
+        the last stage named.
+        """
         try:
             frame = self.session.cluster_table()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 - nothing to show yet
             return
+
+        step = self.session.steps[-1] if self.session.steps else None
+        defaults = list((step.stage_order if step else None) or ["REM", "NREM"])
         with self.quiet(self.table):
-            self.table.set_table(frame, _stage_choices(self.session))
-
-
-def _split(text: str) -> list[str]:
-    return [p.strip() for p in str(text).replace(",", " ").split() if p.strip()]
+            self.table.set_table(
+                frame, _stage_choices(self.session), defaults=defaults
+            )
 
 
 def _stage_choices(session) -> list[str]:

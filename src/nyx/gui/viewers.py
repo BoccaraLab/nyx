@@ -373,6 +373,21 @@ class NyxTimeFreqViewer(TimeFreqViewer):
         self.vlines[chan].setPos(t)
         self.vlines[chan].setPen(self.params["vline_color"])
 
+        # Setting the axes is part of drawing, not of scrolling: the image is
+        # placed in data coordinates by setRect, so without this the plot keeps
+        # pyqtgraph's default 0-1 range and the frequency axis reads 0 to 1
+        # whatever the transform was actually computed over.
+        plot = self.plots[chan]
+        plot.setXRange(t_start, t_stop, padding=0.0)
+        plot.setYRange(f_start, f_stop, padding=0.0)
+
+        if self.params["display_labels"]:
+            plot.setTitle(
+                f"{chan}: {self.source.get_channel_name(chan=chan)}"
+            )
+        else:
+            plot.setTitle(None)
+
     # -- convenience --------------------------------------------------------
 
     def apply_settings(self, settings: dict) -> None:

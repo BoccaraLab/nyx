@@ -463,10 +463,19 @@ class StageTable(QWidget):
         self._combos: dict[int, QComboBox] = {}
         self._stages: list[str] = []
 
-    def set_table(self, frame, stages: Sequence[str]) -> None:
-        """``frame`` is :func:`nyx.cluster_ordering`'s DataFrame."""
+    def set_table(self, frame, stages: Sequence[str],
+                  defaults: Sequence[str] | None = None) -> None:
+        """``frame`` is :func:`nyx.cluster_ordering`'s DataFrame.
+
+        ``defaults`` names the clusters by position when the frame carries no
+        mapping yet -- which is the state a freshly reclustered run is in.
+        A cluster beyond the end of ``defaults`` is left UNCLASSIFIED rather
+        than folded into the last stage named, so a clustering with more
+        clusters than names says so instead of quietly mislabelling.
+        """
         self._stages = list(stages)
         self._combos = {}
+        defaults = list(defaults or [])
 
         columns = [str(frame.index.name or "order")] + [
             str(c) for c in frame.columns if c != "stage"
@@ -489,9 +498,13 @@ class StageTable(QWidget):
             cluster = int(values["cluster"])
             combo = QComboBox()
             combo.addItems(self._stages)
-            current = str(values.get("stage", "")) if "stage" in frame.columns else ""
-            if current and current in self._stages:
+
+            current = str(values["stage"]) if "stage" in frame.columns else ""
+            if not current or current not in self._stages:
+                current = defaults[row] if row < len(defaults) else "UNCLASSIFIED"
+            if current in self._stages:
                 combo.setCurrentText(current)
+
             combo.currentTextChanged.connect(self.changed)
             self._combos[cluster] = combo
             self.table.setCellWidget(row, len(columns) - 1, combo)

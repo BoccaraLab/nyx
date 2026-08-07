@@ -50,9 +50,12 @@ class DockHost(MainViewer):
     # -- contents ----------------------------------------------------------
 
     def add(self, widget, **kwargs):
-        """``add_view``, but tolerant of a name that is already taken."""
+        """``add_view``, tolerant of a repeated name and of panel preferences."""
         if widget.name in self.viewers:
             self.remove(widget.name)
+        preferred = getattr(widget, "default_location", None)
+        if preferred and not {"location", "tabify_with", "split_with"} & set(kwargs):
+            kwargs["location"] = preferred
         self.add_view(widget, **kwargs)
         return widget
 
@@ -158,7 +161,14 @@ class CanvasPanel(_Dockable):
 
 
 class TextPanel(_Dockable):
-    """A dockable read-only text pane, for summaries and agreement tables."""
+    """A dockable read-only text pane, for summaries and agreement tables.
+
+    These belong along the bottom: they are read once and are wide rather than
+    tall, and docked anywhere else they take width the traces need.
+    """
+
+    #: Where :meth:`DockHost.add` puts one unless told otherwise.
+    default_location = "bottom"
 
     def __init__(self, name: str, parent=None, placeholder: str = ""):
         from PySide6.QtWidgets import QPlainTextEdit

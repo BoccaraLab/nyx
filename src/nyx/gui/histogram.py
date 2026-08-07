@@ -117,12 +117,17 @@ class HistogramViewer(_Dockable):
         self.bins = int(bins)
         self._values = np.array([])
 
-        from PySide6.QtWidgets import QVBoxLayout
+        from PySide6.QtWidgets import QSizePolicy, QVBoxLayout
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        # Without this the panel keeps whatever height the dock first gave it
+        # and refuses to be dragged taller.
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.graphics = pg.GraphicsLayoutWidget()
+        self.graphics.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.graphics.setMinimumHeight(80)
         self.plot = self.graphics.addPlot()
         self.plot.showGrid(x=True, y=True, alpha=0.3)
         self.plot.setLabel("bottom", "value")

@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 import nyx
-from nyx.gui.panels import MplPanel, TextPanel
+from nyx.gui.panels import TextPanel
 from nyx.gui.session import Stage
 from nyx.gui.sources import component_source, epoch_source, trace_sources
 from nyx.gui.tabs.base import Tab
@@ -138,16 +138,14 @@ class ResultTab(Tab):
         return [view_box, compare_box, edit_box, save_box]
 
     def build_docks(self) -> None:
-        # The confusion matrix and the nine-panel summary are built here but
-        # not docked: they are what you look at once, at the end, so they
-        # appear when you save rather than competing for width before then.
+        # No confusion matrix or summary here: they are what you look at
+        # once, at the end, and they open as their own windows on save.
         self.agreement = TextPanel(
             "agreement",
             placeholder="No manual scoring was loaded, so there is nothing to "
                         "compare against. That is a normal way to run nyx.",
         )
-        self.confusion = MplPanel("confusion", placeholder="Needs a reference.")
-        self.summary = MplPanel("summary", placeholder="The nine-panel summary.")
+        self._windows: list = []
 
     # -- panels ------------------------------------------------------------
 
@@ -192,7 +190,7 @@ class ResultTab(Tab):
             rules=self.session.postprocess_rules(),
         )
         self.docks.add(self.encoder)
-        self.docks.add(self.agreement, location="right")
+        self.docks.add(self.agreement)   # bottom, by TextPanel default
 
         if self.show_reference.isChecked():
             self._add_reference(offset)
@@ -307,13 +305,24 @@ class ResultTab(Tab):
         self._show_final_figures()
 
     def _show_final_figures(self) -> None:
-        """The look-at-it-once figures, docked now that the run is finished."""
+        """The look-at-it-once figures, as windows of their own.
+
+        Not docked: they are the end of the run, wanted large and often
+        side by side with something else, and a dock would only take width
+        from the scoring you are still looking at.
+        """
         result = self.session.result()
-        self.summary.set_figure(nyx.plot_summary(result))
-        self.docks.add(self.summary, tabify_with="agreement")
+        name = self.session.recording.name or "recording"
+
+        self._windows = [
+            _figure_window(nyx.plot_summary(result), f"{name} -- summary", self)
+        ]
         if result.agreement is not None:
-            self.confusion.set_figure(_confusion_figure(result))
-            self.docks.add(self.confusion, tabify_with="summary")
+            self._windows.append(
+                _figure_window(
+                    _confusion_figure(result), f"{name} -- confusion", self
+                )
+            )
 
     # -- readouts ----------------------------------------------------------
 
@@ -367,3 +376,23 @@ def _coloured(viewer):
     except Exception:  # noqa: BLE001 - parameter names vary between releases
         pass
     return viewer
+
+
+def _figure_window(figure, title: str, parent=None):
+    """Show a figure in a window of its own, with a save-image toolbar."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QVBoxLayout as _V
+    from PySide6.QtWidgets import QWidget as _W
+
+    from nyx.gui.canvas import FigureView
+
+    window = _W(parent, Qt.Window)
+    window.setWindowTitle(title)
+    window.resize(1100, 800)
+    layout = _V(window)
+    layout.setContentsMargins(0, 0, 0, 0)
+    view = FigureView()
+    view.set_figure(figure)
+    layout.addWidget(view)
+    window.show()
+    return window

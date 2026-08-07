@@ -55,6 +55,7 @@ class EmgTab(Tab):
         "Drag the red line, on the distribution or on the trace -- they are "
         "the same number. The bouts below redraw when you let go."
     )
+    run_at_top = True
     stage = Stage.WAKE_SLEEP
     run_label = "Compute the EMG features"
 
@@ -161,9 +162,11 @@ class EmgTab(Tab):
 
         _eeg, emg_trace, offset = trace_sources(self.session.windowed())
 
-        self.histogram = HistogramViewer(name="EMG distribution")
-        self.histogram.set_values(emg.power, "EMG power (scaled)")
-        self.docks.add(self.histogram)
+        # Top to bottom: the signal, the power it is summarised into, and
+        # the bouts that fall out of the cut. Reading downwards is reading the
+        # decision being made.
+        if emg_trace is not None:
+            self.docks.add(TraceViewer(source=emg_trace, name="EMG"))
 
         self.power = TraceViewer(
             source=power_source(emg, offset), name="EMG power"
@@ -171,15 +174,14 @@ class EmgTab(Tab):
         # The power is min-max scaled to [0, 1], and auto-scaling a trace whose
         # tails are near-flat leaves the interesting part in a sliver.
         _fix_range(self.power, -0.01, 1.01)
-        self.docks.add(self.power, location="right")
-
-        if emg_trace is not None:
-            self.docks.add(TraceViewer(source=emg_trace, name="EMG"),
-                           split_with="EMG power", orientation="vertical")
+        self.docks.add(self.power)
 
         if self.session.has(Stage.WAKE_SLEEP):
-            self.docks.add(self._encoder(offset),
-                           split_with="EMG power", orientation="vertical")
+            self.docks.add(self._encoder(offset))
+
+        self.histogram = HistogramViewer(name="EMG distribution")
+        self.histogram.set_values(emg.power, "EMG power (scaled)")
+        self.docks.add(self.histogram, location="right")
 
         # One value, two views. Dragging either moves both, which is the whole
         # point of having both.
@@ -193,11 +195,11 @@ class EmgTab(Tab):
         self.histogram.attach(self._lines)
         self._lines.add(self.power.plot, "h")
 
-        # The distribution is narrow; give the traces the width.
+        # The distribution is read across, not along; the traces need the width.
         self.docks.resizeDocks(
-            [self.docks.viewers["EMG distribution"]["dock"],
-             self.docks.viewers["EMG power"]["dock"]],
-            [300, 900], Qt.Horizontal,
+            [self.docks.viewers["EMG power"]["dock"],
+             self.docks.viewers["EMG distribution"]["dock"]],
+            [900, 340], Qt.Horizontal,
         )
 
     def _encoder(self, offset: float):

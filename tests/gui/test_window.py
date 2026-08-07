@@ -302,6 +302,97 @@ def test_the_wavelet_view_can_be_switched_on(scored_window):
     assert isinstance(tab.docks.panel("EEG spectrum"), NyxTimeFreqViewer)
 
 
+def test_the_wavelet_frequency_axis_covers_the_band(qtbot, scored_window):
+    """It read 0 to 1 whatever the transform was computed over.
+
+    The image is placed in data coordinates, so the plot's own range has to be
+    set alongside it -- which the override of ``on_data_ready`` had dropped.
+    """
+    tab = tab_named(scored_window, "Signal check")
+    tab.scalogram.setChecked(True)
+
+    viewer = tab.docks.panel("EEG spectrum")
+    viewer.refresh()
+    qtbot.waitUntil(lambda: bool(viewer.last_wt_maps), timeout=15_000)
+
+    low, high = viewer.plots[0].getViewBox().viewRange()[1]
+    assert low == pytest.approx(viewer.params["timefreq", "f_start"], abs=0.5)
+    assert high == pytest.approx(viewer.params["timefreq", "f_stop"], abs=0.5)
+
+
+def test_the_text_panels_are_along_the_bottom(scored_window):
+    from PySide6.QtCore import Qt
+
+    for title, panel in (
+        ("Recording", "what was loaded"),
+        ("Signal check", "measurements"),
+        ("Result", "agreement"),
+    ):
+        tab = tab_named(scored_window, title)
+        dock = tab.docks.viewers[panel]["dock"]
+        assert tab.docks.dockWidgetArea(dock) == Qt.BottomDockWidgetArea
+
+
+def test_a_button_that_has_to_be_pressed_first_is_at_the_top(scored_window):
+    placement = {t.title: t.run_at_top for t in scored_window.tabs if t.needs_worker}
+
+    # Compute the EMG features and Recompute the PCA gate everything else on
+    # their tab; the others apply what you have set and move on.
+    assert placement["EMG threshold"] is True
+    assert placement["Sleep stages"] is True
+    assert placement["Signal check"] is False
+
+
+def test_the_emg_trace_is_the_top_panel(scored_window):
+    tab = tab_named(scored_window, "EMG threshold")
+
+    # Top to bottom: the signal, the power it is summarised into, the bouts.
+    assert list(tab.docks.viewers)[0] == "EMG"
+
+
+def test_the_histogram_can_be_resized(scored_window):
+    from PySide6.QtWidgets import QSizePolicy
+
+    tab = tab_named(scored_window, "EMG threshold")
+    histogram = tab.docks.panel("EMG distribution")
+
+    assert histogram.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
+
+
+def test_more_clusters_than_names_does_not_wedge_the_tab(scored_window):
+    """The one that used to raise and leave no way back."""
+    tab = tab_named(scored_window, "Sleep stages")
+
+    tab.clustering.set_values({"method": "kmeans", "n_clusters": 4})
+    scored_window.session.set_cluster_overrides(None)
+    scored_window.session.set_clustering(tab.clustering.values())
+    scored_window.session.compute_through(Stage.STEPS)
+    tab.safe_refresh()
+
+    assert tab.table.table.rowCount() == 4
+    tab._rename()  # must not raise
+
+    # ...and back again.
+    tab.clustering.set_values({"method": "kmeans", "n_clusters": 2})
+    scored_window.session.set_cluster_overrides(None)
+    scored_window.session.set_clustering(tab.clustering.values())
+    scored_window.session.compute_through(Stage.STEPS)
+    tab.safe_refresh()
+
+    assert tab.table.table.rowCount() == 2
+
+
+def test_the_table_is_the_only_thing_that_names_clusters(scored_window):
+    tab = tab_named(scored_window, "Sleep stages")
+
+    # A typed list of names could get out of step with the clustering; one row
+    # per cluster cannot.
+    assert not hasattr(tab, "stage_order")
+    assert tab.table.table.rowCount() == len(
+        scored_window.session.clusters().unique_labels
+    )
+
+
 def test_the_view_settings_can_be_written_into_the_params(scored_window):
     tab = tab_named(scored_window, "Signal check")
 
@@ -410,7 +501,7 @@ def test_the_reference_cannot_be_edited(scored_window):
     assert isinstance(tab.docks.panel("reference"), EpochViewer)
 
 
-def test_the_summary_figures_wait_until_you_save(scored_window, tmp_path):
+def test_the_summary_figures_open_as_windows_when_you_save(scored_window, tmp_path):
     tab = tab_named(scored_window, "Result")
 
     assert not {"confusion", "summary"} & set(tab.docks.viewers)
@@ -418,7 +509,12 @@ def test_the_summary_figures_wait_until_you_save(scored_window, tmp_path):
     tab.output.setText(str(tmp_path))
     tab._save()
 
-    assert "summary" in tab.docks.viewers
+    # Windows of their own, not docks: they are the end of the run, wanted
+    # large, and a dock would take width from the scoring still on screen.
+    titles = [w.windowTitle() for w in tab._windows]
+    assert any("summary" in t for t in titles)
+    assert all(w.isWindow() for w in tab._windows)
+    assert not {"confusion", "summary"} & set(tab.docks.viewers)
 
 
 def test_the_components_are_shown_and_told_apart(scored_window):

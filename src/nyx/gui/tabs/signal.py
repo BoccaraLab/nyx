@@ -232,7 +232,7 @@ class SignalTab(Tab):
                 self._timefreq(emg, "EMG spectrum", "EMG"), tabify_with="EMG"
             )
 
-        self.docks.add(self.summary, location="right")
+        self.docks.add(self.summary)   # bottom, by TextPanel default
         self.docks.add(self.spectra, tabify_with="measurements")
         self._built_for = recording
 
