@@ -255,8 +255,9 @@ def test_substages_collapse_back_to_the_ordinary_scoring(synthetic_recording):
     assert set(collapsed["label"]) <= {"WAKE", "NREM", "REM", "NOSIGNAL"}
 
     def nrem_seconds(hypnogram):
-        return sum(float(d) for d, l in zip(hypnogram["duration"], hypnogram["label"])
-                   if l == "NREM")
+        return sum(float(d) for d, label
+                   in zip(hypnogram["duration"], hypnogram["label"])
+                   if label == "NREM")
 
     # Not identical: the extra step brings its own outlier rejection, so a few
     # epochs become NOSIGNAL that the two-step run scored.
@@ -427,8 +428,10 @@ def test_renaming_rebuilds_the_hypnogram(one_step):
     _ws, outcome = one_step
 
     def seconds(outcome, stage):
-        return sum(float(d) for d, l in zip(outcome.hypnogram["duration"],
-                                            outcome.hypnogram["label"]) if l == stage)
+        return sum(float(d) for d, label
+                   in zip(outcome.hypnogram["duration"],
+                          outcome.hypnogram["label"])
+                   if label == stage)
 
     flipped = rename_clusters(outcome, stage_order=["NREM", "REM"])
 

@@ -155,7 +155,6 @@ def _map_annotations_to_epochs(df, epochs):
     out_labels = []
     df_starts = df['time']
     df_ends = df['time'] + pd.to_timedelta(df['duration'], unit='s')
-    df_labels = df['label']
 
     for epoch_start in epochs:
         epoch_end = epoch_start + epoch_len
@@ -261,7 +260,7 @@ def normalise_labels(hypnogram: dict) -> dict:
         ),
     })
 
-def compare_sleep(auto_data, manual_data, label_order = ['WAKE','QW','REM','NREM'], start=None, end=None, normalize_cm=False, plot=True, debug=False, verbose=True):
+def compare_sleep(auto_data, manual_data, label_order=('WAKE', 'QW', 'REM', 'NREM'), start=None, end=None, normalize_cm=False, plot=True, debug=False, verbose=True):
     """
     Compare automatic and manual scoring using a fine-grained, event-based approach.
     Labels are first aggregated to WAKE, REM, NREM, etc.
@@ -301,7 +300,8 @@ def compare_sleep(auto_data, manual_data, label_order = ['WAKE','QW','REM','NREM
         t_mid = t_start + (t_end - t_start) / 2
         duration = (t_end - t_start).total_seconds()
 
-        if duration < 1e-6: continue
+        if duration < 1e-6:
+            continue
 
         # Find labels at the midpoint of the micro-epoch
         auto_label = auto_df[(auto_df['time'] <= t_mid) & ((auto_df['time'] + pd.to_timedelta(auto_df['duration'], unit='s')) > t_mid)]['label'].values

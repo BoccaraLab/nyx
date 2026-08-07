@@ -69,7 +69,9 @@ def _generate_wavelet_fourier(len_wavelet, f_start, f_stop, deltafreq, sample_ra
     wavelet_coefs=np.exp(1j*2.*np.pi*f0*xsd)*np.exp(-np.power(xsd,2)/2.)
 
     # Normalization
-    weighting_function = lambda x: x**(-(1.0+normalisation))
+    def weighting_function(x):
+        return x ** (-(1.0 + normalisation))
+
     weighted_wavelet_coefs = wavelet_coefs*weighting_function(scales[np.newaxis,:])
 
     # Transform the wavelet into the Fourier domain
@@ -83,11 +85,11 @@ def _compute_scalogram_ephyviewer(data, min_freq, max_freq, freq_resolution, fs,
     # https://github.com/NeuralEnsemble/ephyviewer/blob/master/ephyviewer/timefreqviewer.py
 
     n_samples = len(data)
-    len_wavelet = l = int(2**np.ceil(np.log(wanted_size*fs)/np.log(2)))    
+    len_wavelet = int(2**np.ceil(np.log(wanted_size*fs)/np.log(2)))
     sig_chunk_size = wanted_size*fs
-    downsample_ratio = int(np.ceil(sig_chunk_size/l))
+    downsample_ratio = int(np.ceil(sig_chunk_size/len_wavelet))
     
-    sig_chunk_size = downsample_ratio*l
+    sig_chunk_size = downsample_ratio*len_wavelet
     sub_sample_rate = fs/downsample_ratio
     
     wavelet_fourrier = _generate_wavelet_fourier(len_wavelet, min_freq, max_freq,

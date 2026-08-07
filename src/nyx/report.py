@@ -475,7 +475,6 @@ def plot_cluster_features(clusters, *, stages=None, max_points: int = 20_000,
     names = _feature_names(clusters)
     keep = _subsample(len(clusters.features_scaled), max_points)
     points = clusters.features_scaled[keep]
-    labels = clusters.labels[keep]
     inliers = ~clusters.outlier_mask[keep]
 
     x, y = points[:, 0], points[:, 1] if points.shape[1] > 1 else np.zeros(len(points))
@@ -691,9 +690,8 @@ def plot_scoring_overview(result, max_points: int = 4000, figsize=None, *,
     """
     import pandas as pd
 
-    from nyx.plotting import generate_custom_plot
-
     from nyx.metrics import normalise_labels
+    from nyx.plotting import generate_custom_plot
 
     recording = result.recording
     reference = result.reference

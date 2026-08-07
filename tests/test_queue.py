@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 import nyx
-from nyx.queue import DONE, FAILED, PENDING, SKIPPED
+from nyx.queue import DONE, FAILED
 
 
 @pytest.fixture

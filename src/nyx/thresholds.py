@@ -23,7 +23,8 @@ def find_emg_threshold(feature_emg,
         feature_emg = np.clip(feature_emg, a_min=0, a_max=None)
 
     ft = feature_emg.copy()
-    inv_fn = lambda z: z
+    def inv_fn(z):
+        return z
 
     # 2) select K by BIC
     best_bic = np.inf

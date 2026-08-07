@@ -50,7 +50,7 @@ def run_clustering_step(features_scaled: np.ndarray, scaler, clustering_params: 
     def _reindex(labels, unique_clusters):
         """Remap arbitrary cluster IDs to contiguous 0..n-1."""
         lmap = {c: i for i, c in enumerate(unique_clusters)}
-        return np.array([lmap[l] for l in labels], dtype=int)
+        return np.array([lmap[c] for c in labels], dtype=int)
 
     if method == 'kmeans':
         model = KMeans(n_clusters=n_clusters, random_state=0, n_init=10)

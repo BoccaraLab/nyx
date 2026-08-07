@@ -240,7 +240,7 @@ def decimate_envelope(x, y, max_points: int = 4000):
     out[0::2], out[1::2] = blocks.min(axis=1), blocks.max(axis=1)
     return np.repeat(x[:usable:block], 2), out
 
-def plot_reconstructed_spectrogram(reconstructed_spectrogram, frequencies, times, time_window=None, title="Reconstructed Spectrogram", savepath=None, im_range=[0, 1]):
+def plot_reconstructed_spectrogram(reconstructed_spectrogram, frequencies, times, time_window=None, title="Reconstructed Spectrogram", savepath=None, im_range=(0, 1)):
     """
     Plots the reconstructed spectrogram using generate_custom_plot, with an option to focus on a specific time window.
 
