@@ -79,8 +79,8 @@ dev = [
 nyx-gui = "nyx.gui:main"
 
 [project.urls]
-Homepage = "https://github.com/lsignorelli/nyx"
-Issues = "https://github.com/lsignorelli/nyx/issues"
+Homepage = "https://github.com/BoccaraLab/nyx"
+Issues = "https://github.com/BoccaraLab/nyx/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

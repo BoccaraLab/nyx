@@ -5,11 +5,16 @@ type: software
 license: LGPL-3.0-or-later
 copyright: "Copyright © C. Boccara Lab."
 version: 0.1.0
-date-released: "2026-08-04"
+date-released: "2026-08-07"
 
-# Add this once the repository exists, so the "Cite this repository" button and
-# any Zenodo archive point at the right place:
-# repository-code: "https://github.com/<org>/nyx"
+repository-code: "https://github.com/BoccaraLab/nyx"
+
+# Add once the software is archived on Zenodo, so the DOI resolves to this
+# release rather than to the preprint:
+# identifiers:
+#   - type: doi
+#     value: "10.5281/zenodo.XXXXXXX"
+#     description: "Archived source for version 0.1.0"
 
 abstract: >-
   Nyx scores sleep from EEG and EMG without training data or manually scored
