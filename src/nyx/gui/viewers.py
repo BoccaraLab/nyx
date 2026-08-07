@@ -39,6 +39,9 @@ import scipy.signal
 import scipy.stats
 from ephyviewer.myqt import QT
 from ephyviewer.spectrogramviewer import SpectrogramViewer, SpectrogramWorker
+from ephyviewer.spectrogramviewer import (
+    default_params as upstream_spectrogram_params,
+)
 from ephyviewer.timefreqviewer import (
     TimeFreqViewer,
     TimeFreqViewer_ParamController,
@@ -72,6 +75,11 @@ def _with_nyx_timefreq_params() -> list:
     """
     params = copy.deepcopy(upstream_params)
     for entry in params:
+        # jet is what the lab reads sleep spectrograms in, and what every
+        # figure in the paper uses. Matching it is worth more here than
+        # perceptual uniformity.
+        if entry.get("name") == "colormap":
+            entry["value"] = "jet"
         if entry.get("name") == "timefreq":
             entry["children"] = list(entry["children"]) + [
                 {"name": "decibel", "type": "bool", "value": True},
@@ -100,6 +108,36 @@ def _with_two_ended_clim() -> list:
         else:
             params.append(entry)
     return params
+
+
+def _apply_batched(viewer, group, settings: dict) -> None:
+    """Set several viewer parameters, rebuilding the plots once at the end.
+
+    Both viewers respond to *any* parameter change by calling ``create_grid``,
+    which tears down every plot item and builds new ones. Setting four
+    parameters one at a time therefore does that four times, and each rebuild
+    invalidates the image a worker may be part way through reporting into --
+    which is an access violation, not an exception, and it took down the test
+    run about one time in three.
+
+    So the changes are made with the parameter tree silenced, and the rebuild
+    is done once, deliberately, afterwards.
+    """
+    blocked = group.blockSignals(True)
+    try:
+        for name, value in settings.items():
+            try:
+                group.param(name).setValue(value)
+            except Exception:  # noqa: BLE001 - an unknown key is not fatal
+                continue
+    finally:
+        group.blockSignals(blocked)
+
+    viewer.change_color_scale()
+    viewer.create_grid()
+    if hasattr(viewer, "initialize_time_freq"):
+        viewer.initialize_time_freq()
+    viewer.refresh()
 
 
 def _emit(signal, *args) -> None:
@@ -392,14 +430,7 @@ class NyxTimeFreqViewer(TimeFreqViewer):
 
     def apply_settings(self, settings: dict) -> None:
         """Set scalogram parameters from :func:`timefreq_params_from`."""
-        group = self.params.param("timefreq")
-        for name, value in settings.items():
-            try:
-                group.param(name).setValue(value)
-            except Exception:  # noqa: BLE001 - an unknown key is not fatal
-                continue
-        self.initialize_time_freq()
-        self.refresh()
+        _apply_batched(self, self.params.param("timefreq"), settings)
 
 
 class NyxEpochEncoder(EpochEncoder):
@@ -421,12 +452,33 @@ class NyxEpochEncoder(EpochEncoder):
     any change.
     """
 
-    def __init__(self, rules=None, **kargs):
+    def __init__(self, rules=None, epoch_length: float = 4.0, **kargs):
         self._rules = list(rules or [])
         self._flagged: set[int] = set()
         super().__init__(**kargs)
         self._add_navigation()
+        self._set_defaults(epoch_length)
         self.refresh_flags()
+
+    def _set_defaults(self, epoch_length: float) -> None:
+        """Open showing the hypnogram, not the machinery around it.
+
+        The controls take a third of the panel and are wanted only when you
+        are actually editing; the arrow in the toolbar brings them back. The
+        range selector starts one epoch wide, since an epoch is the unit
+        everything here is scored in -- upstream starts it at one second,
+        which is not a length anything in a hypnogram has.
+        """
+        try:
+            self.controls.hide()
+            self.toggle_controls_visibility_button.setArrowType(QT.DownArrow)
+        except Exception:  # noqa: BLE001 - layout varies between releases
+            pass
+        try:
+            self.spin_limit1.setValue(0.0)
+            self.spin_limit2.setValue(float(epoch_length))
+        except Exception:  # noqa: BLE001
+            pass
 
     # -- setup -------------------------------------------------------------
 
@@ -686,6 +738,17 @@ class NyxSpectrogramWorker(SpectrogramWorker):
             _emit(self.data_ready, chan, t, t_start, t_stop, t_start, t_stop, None)
 
 
+def _spectrogram_params() -> list:
+    """Upstream's, but starting on jet."""
+    params = copy.deepcopy(upstream_spectrogram_params)
+    for entry in params:
+        if entry.get("name") == "colormap":
+            entry["value"] = "jet"
+            if "jet" not in entry.get("limits", []):
+                entry["limits"] = list(entry.get("limits", [])) + ["jet"]
+    return params
+
+
 class NyxSpectrogramViewer(SpectrogramViewer):
     """The fast Fourier view, with settings that show something.
 
@@ -693,6 +756,8 @@ class NyxSpectrogramViewer(SpectrogramViewer):
     swapped, which upstream has no hook for, so ``__init__`` is copied to do
     it. A two-line ``_WorkerClass`` attribute upstream would remove both.
     """
+
+    _default_params = None   # set below, once _spectrogram_params exists
 
     def __init__(self, **kargs):
         # Copied from SpectrogramViewer.__init__ so the worker class can be
@@ -737,13 +802,7 @@ class NyxSpectrogramViewer(SpectrogramViewer):
     def apply_settings(self, settings: dict) -> None:
         """Set spectrogram parameters from :func:`spectrogram_params_from`."""
         # Upstream calls the group "scalogram" even in the Fourier viewer.
-        group = self.params.param("scalogram")
-        for name, value in settings.items():
-            try:
-                group.param(name).setValue(value)
-            except Exception:  # noqa: BLE001 - an unknown key is not fatal
-                continue
-        self.refresh()
+        _apply_batched(self, self.params.param("scalogram"), settings)
 
 
 def make_timefreq_viewer(source, name: str, params: dict, channel: str,
@@ -761,3 +820,6 @@ def make_timefreq_viewer(source, name: str, params: dict, channel: str,
     viewer = NyxSpectrogramViewer(source=source, name=name)
     viewer.apply_settings(spectrogram_params_from(params, channel))
     return viewer
+
+
+NyxSpectrogramViewer._default_params = _spectrogram_params()

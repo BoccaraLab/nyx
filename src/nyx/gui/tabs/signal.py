@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 import nyx
 from nyx.gui.panels import MplPanel, TextPanel
 from nyx.gui.session import Stage
-from nyx.gui.sources import trace_sources
+from nyx.gui.sources import autoscale, trace_sources
 from nyx.gui.tabs.base import Tab
 from nyx.gui.viewers import (
     make_timefreq_viewer,
@@ -256,12 +256,12 @@ class SignalTab(Tab):
         self.docks.clear()
         eeg, emg, _offset = trace_sources(recording)
 
-        self.docks.add(TraceViewer(source=eeg, name="EEG"))
+        self.docks.add(autoscale(TraceViewer(source=eeg, name="EEG")))
         self.docks.add(
             self._timefreq(eeg, "EEG spectrum", "EEG"), tabify_with="EEG"
         )
         if emg is not None:
-            self.docks.add(TraceViewer(source=emg, name="EMG"))
+            self.docks.add(autoscale(TraceViewer(source=emg, name="EMG")))
             self.docks.add(
                 self._timefreq(emg, "EMG spectrum", "EMG"), tabify_with="EMG"
             )

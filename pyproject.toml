@@ -86,6 +86,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 nyx = ["params/*.json", "params/README.md"]
+"nyx.gui" = ["resources/*.png", "resources/*.ico"]
 
 [tool.ruff]
 line-length = 100

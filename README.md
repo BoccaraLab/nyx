@@ -1,3 +1,5 @@
+<img src="src/nyx/gui/resources/nyx_logo.png" alt="nyx" width="180">
+
 # nyx
 
 A flexible framework for sleep scoring across species, lifespan and modalities.
@@ -158,11 +160,17 @@ ephyviewer views on one clock — scroll the EEG and the EMG power, the PCs and
 the hypnogram all follow. The things that are not time series (the cluster
 scatter, the per-cluster spectra) are matplotlib, and dock alongside.
 
-The hypnogram on the Result tab is editable in place: `alt`+arrows jump to the
-next change of stage, `ctrl`+arrows to the next epoch a postprocessing rule
-objects to — those are drawn faded, so you can see them without navigating.
-What you edit is what gets saved, and `run.json` records that a human changed
-it.
+Both hypnograms — the wake/sleep split and the final scoring — are editable in
+place: `alt`+arrows jump to the next change of stage, `ctrl`+arrows to the next
+epoch a postprocessing rule objects to, and those are drawn faded so you can
+see them without navigating. Corrections only count once you apply them; from
+then on they are what gets saved, and `run.json` records that a person changed
+the scoring.
+
+Clusters can also be assigned by hand: draw round a group of points in the
+scatter and give them a stage, for the cases clustering will not get on its own.
+
+Every section explains itself behind the **?** next to its title.
 
 The GUI runs the same functions the notebooks do — no second implementation.
 On the Oxford benchmark it reproduces `03_score_rodents` segment for segment.

@@ -110,8 +110,9 @@ class ReviewWindow(MainViewer):
     collected leaves those threads running against deleted C++ objects, which
     takes the whole process down on the way out rather than raising anything.
 
-    So closing is made to happen: the window deletes itself on close, and
-    ``__del__`` closes it if nothing else did.
+    So closing has to be made to happen -- by the user, or by whoever opened
+    it. It is not done in ``__del__``, which is the obvious place and the
+    wrong one: see the note below.
 
     It also clears the encoder's unsaved-changes flag first. That prompt is
     ephyviewer asking whether to write a file, which is not how saving works
@@ -124,12 +125,10 @@ class ReviewWindow(MainViewer):
             encoder.changes_since_save = 0
         super().closeEvent(event)
 
-    def __del__(self):
-        try:
-            if not self.isHidden() or self.isVisible():
-                self.close()
-        except Exception:  # noqa: BLE001 - Qt may already be gone
-            pass
+    # Deliberately no __del__: it can run during interpreter shutdown, after
+    # Qt has torn itself down, and touching a Qt object there is an access
+    # violation rather than an exception. The window is closed explicitly --
+    # by the user, or by the fixture that built it.
 
 
 def build_review_window(

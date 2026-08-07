@@ -114,14 +114,24 @@ def run(argv: list[str] | None = None) -> int:
     try:
         from PySide6 import QtWidgets
 
-        from nyx.gui.mainwindow import MainWindow
-        from nyx.gui.session import ScoringSession
+        from nyx.gui import branding
     except ImportError as exc:  # pragma: no cover - depends on the install
         sys.stderr.write(_missing_dependency(exc))
         return 1
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([sys.argv[0]])
     app.setApplicationName("nyx")
+    branding.apply_to(app)
+
+    # Up before the heavy imports below: scipy, sklearn, spikeinterface, mne
+    # and pyqtgraph together are several seconds of nothing visible happening.
+    screen = branding.splash()
+    if screen is not None:
+        screen.show()
+        app.processEvents()
+
+    from nyx.gui.mainwindow import MainWindow
+    from nyx.gui.session import ScoringSession
 
     session = None
     if arguments.config:
@@ -140,6 +150,10 @@ def run(argv: list[str] | None = None) -> int:
         window.tabs[0]._load_demo()
 
     window.show()
+    if screen is not None:
+        # Closed against the window it was covering for, so it cannot outlive
+        # it and sit on top of everything.
+        screen.finish(window)
     return int(app.exec())
 
 

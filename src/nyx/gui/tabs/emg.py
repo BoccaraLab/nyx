@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 
 from nyx.gui.histogram import HistogramViewer, ThresholdLines
 from nyx.gui.session import Stage
-from nyx.gui.sources import power_source, trace_sources
+from nyx.gui.sources import autoscale, fix_range, power_source, trace_sources
 from nyx.gui.tabs.base import Tab
 from nyx.gui.widgets import Section, help_label, monospace
 
@@ -176,14 +176,14 @@ class EmgTab(Tab):
         # signal, the power it is summarised into, the distribution of that
         # power with the cut on it, and the bouts that fall out of the cut.
         if emg_trace is not None:
-            self.docks.add(TraceViewer(source=emg_trace, name="EMG"))
+            self.docks.add(autoscale(TraceViewer(source=emg_trace, name="EMG")))
 
         self.power = TraceViewer(
             source=power_source(emg, offset), name="EMG power"
         )
         # The power is min-max scaled to [0, 1], and auto-scaling a trace whose
         # tails are near-flat leaves the interesting part in a sliver.
-        _fix_range(self.power, -0.01, 1.01)
+        fix_range(self.power, -0.01, 1.01)
         self.docks.add(self.power)
 
         self.histogram = HistogramViewer(name="EMG distribution")
@@ -231,6 +231,7 @@ class EmgTab(Tab):
         self.encoder = NyxEpochEncoder(
             source=self.epoch_source, name="wake / sleep",
             rules=self.session.postprocess_rules(),
+            epoch_length=self.session.min_duration(),
         )
         return self.encoder
 
@@ -409,20 +410,3 @@ class EmgTab(Tab):
                 "Long power trace: the bouts redraw when you release the "
                 "mouse rather than while dragging."
             )
-
-
-def _fix_range(viewer, low: float, high: float) -> None:
-    """Pin a trace viewer's y range instead of letting it auto-scale.
-
-    Auto-scaling a min-max scaled power trace puts the whole distribution in a
-    sliver, because its tails run right to the edges.
-    """
-    try:
-        viewer.params["ylim_min"] = low
-        viewer.params["ylim_max"] = high
-        viewer.params["auto_scale_factor"] = 1.0
-        for i in range(viewer.source.nb_channel):
-            viewer.by_channel_params[f"ch{i}", "gain"] = 1.0
-            viewer.by_channel_params[f"ch{i}", "offset"] = 0.0
-    except Exception:  # noqa: BLE001 - parameter names vary between releases
-        pass

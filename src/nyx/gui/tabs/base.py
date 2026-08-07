@@ -59,6 +59,8 @@ class Tab(QWidget):
 
     run_requested = Signal(object)
     status = Signal(str)
+    #: Emitted with the directory a result was written to.
+    saved = Signal(str)
 
     def __init__(self, session: ScoringSession, parent=None):
         super().__init__(parent)

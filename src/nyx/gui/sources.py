@@ -33,6 +33,8 @@ from ephyviewer.datasource import (
 from nyx.gui.hypnogram import to_epoch_dict
 
 __all__ = [
+    "autoscale",
+    "fix_range",
     "trace_sources",
     "power_source",
     "component_source",
@@ -107,3 +109,39 @@ def epoch_sources(named, t_offset: float = 0.0):
         if hypnogram is not None
     ]
     return InMemoryEpochSource(all_epochs=epochs) if epochs else None
+
+
+def autoscale(viewer):
+    """Scale a raw trace to its own amplitude, once, when it first appears.
+
+    ephyviewer opens every trace on a fixed range, which for a recording in
+    volts rather than microvolts is a flat line down the middle. Auto-scaling
+    reads the amplitude off the data instead.
+
+    It has to fetch a chunk first: ``auto_scale`` measures what the viewer has
+    already drawn, so calling it on a viewer that has never refreshed measures
+    nothing.
+
+    Only for signals whose units are unknown. The EMG power is scaled to
+    ``[0, 1]`` and the component scores have a meaningful spread of their own;
+    both are pinned with :func:`fix_range` instead.
+    """
+    try:
+        viewer.refresh()
+        viewer.auto_scale()
+    except Exception:  # noqa: BLE001 - not every viewer scales
+        pass
+    return viewer
+
+
+def fix_range(viewer, low: float, high: float):
+    """Pin a trace viewer's y range instead of letting it auto-scale."""
+    try:
+        viewer.params["ylim_min"] = float(low)
+        viewer.params["ylim_max"] = float(high)
+        for i in range(viewer.source.nb_channel):
+            viewer.by_channel_params[f"ch{i}", "gain"] = 1.0
+            viewer.by_channel_params[f"ch{i}", "offset"] = 0.0
+    except Exception:  # noqa: BLE001 - parameter names vary between releases
+        pass
+    return viewer

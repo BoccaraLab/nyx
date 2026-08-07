@@ -289,6 +289,21 @@ class SleepTab(Tab):
             self.lasso.setChecked(False)   # -> _finish_lasso
 
     def _clear_manual(self) -> None:
+        # Take the drawn shape away too. Leaving it on the scatter after its
+        # assignment has been undone says something that is no longer true.
+        if self.lasso.isChecked():
+            with self.quiet(self.lasso):
+                self.lasso.setChecked(False)
+            self.lasso.setText("Draw")
+        selector = getattr(self, "_selector", None)
+        if selector is not None:
+            try:
+                selector.clear()
+                selector.disconnect()
+            except Exception:  # noqa: BLE001 - the figure may already be gone
+                pass
+            self._selector = None
+
         self.session.clear_manual_epochs()
         self.manual_note.setText("")
         self._redraw_figures()

@@ -77,6 +77,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("nyx")
         self.resize(1400, 900)
 
+        from nyx.gui import branding
+
+        self.setWindowIcon(branding.icon())
+
         self.session = session or ScoringSession()
         self.jobs = JobRunner(self)
         self._running_stage: Stage | None = None
@@ -116,6 +120,7 @@ class MainWindow(QMainWindow):
             tab = factory(self.session)
             tab.run_requested.connect(self._run_stage)
             tab.status.connect(self.status)
+            tab.saved.connect(self.set_saved)
             self.tabs.append(tab)
             self.stack.addWidget(tab)
 
@@ -134,6 +139,14 @@ class MainWindow(QMainWindow):
         self.progress.setFixedWidth(160)
         self.progress.hide()
         self.statusBar().addPermanentWidget(self.progress)
+
+        # Whether this recording has been written out, and where. A status
+        # message says so for eight seconds and then it is gone; whether the
+        # work is saved is worth being able to check at any point.
+        self.saved_label = QLabel()
+        self.saved_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.statusBar().addPermanentWidget(self.saved_label)
+        self.set_saved(None)
 
         # -- log. Before the first status(), which writes to it.
         self.log = LogPane()
@@ -258,6 +271,7 @@ class MainWindow(QMainWindow):
         if recording is not getattr(self, "_last_recording", None):
             self._last_recording = recording
             self._computed_once.clear()
+            self.set_saved(None)
 
         for tab in self.tabs:
             if self.session.has(tab.stage):
@@ -297,6 +311,19 @@ class MainWindow(QMainWindow):
             if tab.stage is stage:
                 self.rail.setCurrentRow(index)
                 return
+
+    def set_saved(self, path: str | None) -> None:
+        """Show where this recording was written, or that it has not been."""
+        if path:
+            self.saved_label.setText(f"  saved to {path}  ")
+            self.saved_label.setStyleSheet("color: #6abf69;")
+            self.saved_label.setToolTip(path)
+        else:
+            self.saved_label.setText("  not saved  ")
+            self.saved_label.setStyleSheet("color: #e0a34a;")
+            self.saved_label.setToolTip(
+                "Nothing has been written out for this recording yet."
+            )
 
     def status(self, text: str) -> None:
         self.statusBar().showMessage(str(text), 8000)

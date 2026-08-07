@@ -33,7 +33,12 @@ from PySide6.QtWidgets import (
 import nyx
 from nyx.gui.panels import TextPanel
 from nyx.gui.session import Stage
-from nyx.gui.sources import component_source, trace_sources
+from nyx.gui.sources import (
+    autoscale,
+    component_source,
+    fix_range,
+    trace_sources,
+)
 from nyx.gui.tabs.base import Tab
 from nyx.gui.viewers import make_timefreq_viewer
 from nyx.gui.widgets import Section, help_label
@@ -204,15 +209,19 @@ class ResultTab(Tab):
         params = self.session.params
 
         if emg is not None:
-            self.docks.add(TraceViewer(source=emg, name="EMG"))
-        self.docks.add(TraceViewer(source=eeg, name="EEG"))
+            self.docks.add(autoscale(TraceViewer(source=emg, name="EMG")))
+        self.docks.add(autoscale(TraceViewer(source=eeg, name="EEG")))
         self.docks.add(self._timefreq(eeg, "EEG spectrum", "EEG", params))
 
         components = component_source(self.session.pca(), n=4, t_offset=offset)
         if components is not None:
-            self.docks.add(_coloured(
-                TraceViewer(source=components, name="components")
-            ))
+            viewer = _coloured(TraceViewer(source=components, name="components"))
+            # PC scores have no natural unit, and their spread differs by an
+            # order of magnitude between the first component and the fourth.
+            # Scaling to the range they actually occupy is the only way all
+            # four are legible at once.
+            _min_max(viewer, self.session.pca(), n=4)
+            self.docks.add(viewer)
 
         self.epoch_source = NyxEpochSource(
             result.hypnogram, name="nyx", t_offset=offset,
@@ -221,6 +230,7 @@ class ResultTab(Tab):
         self.encoder = NyxEpochEncoder(
             source=self.epoch_source, name="hypnogram",
             rules=self.session.postprocess_rules(),
+            epoch_length=self.session.min_duration(),
         )
         self.docks.add(self.encoder)
 
@@ -260,7 +270,10 @@ class ResultTab(Tab):
         source = NyxEpochSource(
             normalise_labels(reference), name="reference", t_offset=offset
         )
-        encoder = NyxEpochEncoder(source=source, name="reference", rules=[])
+        encoder = NyxEpochEncoder(
+            source=source, name="reference", rules=[],
+            epoch_length=self.session.min_duration(),
+        )
         encoder.make_read_only()
         self.docks.add(encoder, tabify_with="hypnogram")
         self.docks.add(self.agreement, tabify_with="reference")
@@ -341,6 +354,7 @@ class ResultTab(Tab):
         self.status.emit(f"Saved to {written}")
         for name in sorted(os.listdir(written)):
             self.status.emit(f"  {name}")
+        self.saved.emit(written)
 
         self._show_final_figures()
 
@@ -437,3 +451,19 @@ def _figure_window(figure, title: str, parent=None):
     layout.addWidget(view)
     window.show()
     return window
+
+
+def _min_max(viewer, pca, n: int = 4) -> None:
+    """Scale the component traces to the range the scores actually occupy."""
+    import numpy as np
+
+    signal = np.asarray(getattr(pca, "signal", None))
+    if signal is None or signal.size == 0:
+        return
+    values = signal[:, :n]
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return
+    low, high = float(finite.min()), float(finite.max())
+    pad = 0.05 * (high - low or 1.0)
+    fix_range(viewer, low - pad, high + pad)

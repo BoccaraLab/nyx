@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 import nyx
@@ -651,6 +652,126 @@ def test_the_components_are_shown_and_told_apart(scored_window):
         for i in range(components.source.nb_channel)
     ]
     assert len(set(colours)) == len(colours)
+
+
+# ---------------------------------------------------------------------------
+# Defaults you should not have to set yourself
+# ---------------------------------------------------------------------------
+
+
+def test_raw_traces_are_scaled_to_their_own_amplitude(scored_window):
+    """A recording in volts opens as a flat line on ephyviewer's fixed range."""
+    tab = tab_named(scored_window, "Signal check")
+    eeg = tab.docks.panel("EEG")
+
+    low, high = eeg.params["ylim_min"], eeg.params["ylim_max"]
+    assert low < 0 < high
+    assert (high - low) != pytest.approx(2.0)   # not still the default
+
+
+def test_the_power_and_the_components_are_pinned_instead(scored_window):
+    emg = tab_named(scored_window, "EMG threshold")
+    power = emg.docks.panel("EMG power")
+    assert (power.params["ylim_min"], power.params["ylim_max"]) == (
+        pytest.approx(-0.01), pytest.approx(1.01)
+    )
+
+    result = tab_named(scored_window, "Result")
+    components = result.docks.panel("components")
+    signal = scored_window.session.pca().signal[:, :4]
+    finite = signal[np.isfinite(signal)]
+    # Wide enough to hold the scores, and not much wider.
+    assert components.params["ylim_min"] <= float(finite.min())
+    assert components.params["ylim_max"] >= float(finite.max())
+
+
+def test_the_hypnogram_opens_showing_the_hypnogram(scored_window):
+    tab = tab_named(scored_window, "EMG threshold")
+    encoder = tab.docks.panel("wake / sleep")
+
+    # The controls take a third of the panel and are wanted only while editing.
+    assert encoder.controls.isHidden()
+
+
+def test_the_range_selector_starts_one_epoch_wide(scored_window):
+    tab = tab_named(scored_window, "EMG threshold")
+    encoder = tab.docks.panel("wake / sleep")
+
+    # Upstream starts it at one second, which is not a length anything in a
+    # hypnogram has.
+    width = encoder.spin_limit2.value() - encoder.spin_limit1.value()
+    assert width == pytest.approx(scored_window.session.min_duration())
+
+
+@pytest.mark.parametrize("wavelet", [False, True])
+def test_the_time_frequency_views_start_on_jet(scored_window, wavelet):
+    tab = tab_named(scored_window, "Signal check")
+    tab.scalogram.setChecked(wavelet)
+
+    assert tab.docks.panel("EEG spectrum").params["colormap"] == "jet"
+
+
+def test_the_toolbars_are_readable_against_the_dark_panels(scored_window):
+    # ephyviewer ships dark icons drawn for a light theme; on a dark one they
+    # are black on near-black.
+    for tab in scored_window.tabs:
+        assert "QToolBar" in tab.docks.styleSheet()
+
+
+def test_clearing_hand_assignments_takes_the_drawing_away(scored_window):
+    tab = tab_named(scored_window, "Sleep stages")
+    tab.lasso.setChecked(True)
+    assert tab._selector is not None
+
+    tab._clear_manual()
+
+    # Leaving the shape on the scatter after its assignment is undone says
+    # something that is no longer true.
+    assert tab._selector is None
+    assert not tab.lasso.isChecked()
+    assert tab.lasso.text() == "Draw"
+
+
+def test_the_window_says_whether_the_result_has_been_saved(scored_window, tmp_path):
+    assert "not saved" in scored_window.saved_label.text()
+
+    tab = tab_named(scored_window, "Result")
+    tab.output.setText(str(tmp_path))
+    tab._save()
+
+    # A status message lasts eight seconds; whether the work is written out is
+    # worth being able to check at any point.
+    assert str(tmp_path) in scored_window.saved_label.text()
+
+
+def test_a_new_recording_is_not_saved(scored_window, tmp_path):
+    tab = tab_named(scored_window, "Result")
+    tab.output.setText(str(tmp_path))
+    tab._save()
+
+    recording, truth = nyx.demo_recording(seed=3)
+    scored_window.session.set_recording(recording, reference=truth)
+    scored_window.refresh_rail()
+
+    assert "not saved" in scored_window.saved_label.text()
+
+
+def test_the_logo_ships_and_loads(scored_window):
+    from nyx.gui import branding
+
+    assert branding.logo_path() is not None
+    assert branding.logo_path(branding.WINDOWS_ICON) is not None
+    assert not branding.icon().isNull()
+    assert not scored_window.windowIcon().isNull()
+
+
+def test_the_splash_is_built_from_the_logo(qtbot):
+    from nyx.gui import branding
+
+    splash = branding.splash()
+    assert splash is not None
+    qtbot.addWidget(splash)
+    assert not splash.pixmap().isNull()
 
 
 # ---------------------------------------------------------------------------

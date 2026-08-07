@@ -27,7 +27,22 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from nyx.gui.canvas import FigureView, PanelCanvas
 
-__all__ = ["DockHost", "MplPanel", "TextPanel"]
+__all__ = ["DockHost", "MplPanel", "TextPanel", "TOOLBAR_STYLE"]
+
+#: ephyviewer ships dark icons drawn for a light theme. On a dark one they are
+#: black on near-black and effectively invisible, so the bars they sit in are
+#: given a light background rather than the icons being redrawn.
+TOOLBAR_STYLE = """
+QToolBar { background: #d9d9dd; border: none; spacing: 2px; }
+QToolBar QToolButton { background: #d9d9dd; color: #202020; padding: 2px; }
+QToolBar QToolButton:hover { background: #b9c4d6; }
+QToolBar QToolButton:checked { background: #a8b6cc; }
+QToolBar QPushButton { background: #e6e6ea; color: #202020;
+                       border: 1px solid #a8a8b0; border-radius: 3px;
+                       padding: 2px 8px; }
+QToolBar QPushButton:hover { background: #cfd8e6; }
+QToolBar QLabel { color: #202020; }
+"""
 
 
 class DockHost(MainViewer):
@@ -46,6 +61,7 @@ class DockHost(MainViewer):
         self.setDockNestingEnabled(True)
         # Embedded, so it must behave as a widget rather than a window.
         self.setWindowFlags(Qt.Widget)
+        self.setStyleSheet(TOOLBAR_STYLE)
 
     # -- contents ----------------------------------------------------------
 
@@ -91,11 +107,12 @@ class DockHost(MainViewer):
         except Exception:  # noqa: BLE001 - settings may be unwritable
             event.accept()
 
-    def __del__(self):
-        try:
-            self.clear()
-        except Exception:  # noqa: BLE001 - Qt may already be gone
-            pass
+    # No __del__. It is tempting -- a host that is garbage collected without
+    # being closed leaves its viewers' threads running -- but __del__ on a
+    # QObject can run during interpreter shutdown, after Qt has already torn
+    # itself down, and touching Qt objects there is an access violation rather
+    # than an exception. Closing is done explicitly instead: MainWindow closes
+    # its tabs, and Tab.shutdown closes its dock area.
 
 
 class _Dockable(QWidget):

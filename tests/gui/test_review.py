@@ -242,6 +242,26 @@ def test_the_colour_limit_has_two_ends_so_decibels_can_be_shown(scalogram):
     assert scalogram.by_channel_params["ch0", "clim_min"] == -40.0
 
 
+def test_applying_settings_rebuilds_the_plots_once(scalogram, scored):
+    """Every parameter change rebuilds the plot grid, and a rebuild
+    invalidates the image a worker may be part way through reporting into --
+    which is an access violation rather than an exception. Four settings used
+    to mean four rebuilds; it is one.
+    """
+    from nyx.gui.viewers import timefreq_params_from
+
+    rebuilds = []
+    original = scalogram.create_grid
+    scalogram.create_grid = lambda *a, **k: (rebuilds.append(1), original(*a, **k))[1]
+
+    settings = timefreq_params_from(scored.params, "EEG")
+    assert len(settings) > 1, "the point of the test is several settings at once"
+    scalogram.apply_settings(settings)
+
+    scalogram.create_grid = original
+    assert len(rebuilds) == 1
+
+
 def test_the_viewer_can_be_matched_to_the_params_it_was_scored_with(scalogram, scored):
     from nyx.gui.viewers import timefreq_params_from
 
