@@ -2,6 +2,10 @@
 
 # Nyx
 
+[![tests](https://github.com/BoccaraLab/nyx/actions/workflows/tests.yml/badge.svg)](https://github.com/BoccaraLab/nyx/actions/workflows/tests.yml)
+[![licence: LGPL v3](https://img.shields.io/badge/licence-LGPL--3.0--or--later-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+
 Nyx is a flexible framework for sleep scoring across species, lifespan and modalities.
 
 Nyx separates wake from sleep using EMG power, then splits sleep into stages by
@@ -14,9 +18,36 @@ If you use Nyx, please cite the [preprint](https://www.biorxiv.org/content/10.64
 
 ---
 
-## Install
+## System requirements
+
+**Operating systems.** Any platform with Python 3.10 or newer. Tested on
+Windows 11, Ubuntu 22.04 (GitHub Actions `ubuntu-latest`) and macOS 14
+(`macos-latest`).
+
+**Python.** 3.10, 3.11 and 3.12 are tested on every commit.
+
+**Hardware.** None beyond an ordinary desktop or laptop. No GPU. Memory scales
+with the recording: a 12 h mouse recording at 200 Hz scores comfortably in
+8 GB. The figures below were measured on a laptop with a 13th-generation Intel
+Core i9-13900H and 32 GB of RAM.
+
+**Dependencies.** Installed automatically by `pip`; minimum versions are in
+[`pyproject.toml`](pyproject.toml). The versions the results below were
+produced with:
+
+| | | | |
+|---|---|---|---|
+| numpy 2.5.1 | pandas 3.0.5 | scipy 1.18.0 | scikit-learn 1.9.0 |
+| matplotlib 3.11.1 | hdbscan 0.8.44 | spikeinterface 0.104.8 | mne 1.12.1 |
+| pyedflib 0.1.42 | PySide6 6.11.1 | ephyviewer 1.8.0 | pyqtgraph 0.14.0 |
+
+The last three are needed only for the GUI.
+
+## Installation guide
 
 ```bash
+git clone https://github.com/BoccaraLab/nyx.git
+cd nyx
 conda create -n nyx python=3.12 -y
 conda activate nyx
 pip install -e ".[notebooks]"
@@ -30,17 +61,37 @@ three.
 pip install -e ".[full]"
 ```
 
+**Typical install time:** about **8 minutes** on a normal desktop with a cold
+pip cache and an ordinary broadband connection — most of it downloading and
+building scipy, scikit-learn, spikeinterface, mne and Qt. The smaller
+`.[notebooks]` install is quicker; a warm cache brings either under a minute.
+
 ## Demo
 
 ```bash
 python examples/run_demo.py
 ```
 
-The demo scores a synthetic recording, then repeats the
-exercise on one carrying mains interference and saturated signal at both ends —
-showing the signal check finding both problems and what fixing them is worth:
+No downloads and no data access: the recording is simulated in memory by
+`nyx.demo_recording()`. The demo scores a clean synthetic recording, then
+repeats the exercise on one carrying mains interference and saturated signal at
+both ends — showing the signal check finding both problems and what fixing them
+is worth.
 
-Every figure lands in `examples/demo_output/`; start with `plots/summary.png`.
+**Expected output**, printed at the end:
+
+```
+  clean recording                        MF1 0.996
+  messy recording, nothing fixed         MF1 0.897
+  messy recording, notch + trim applied  MF1 0.995
+```
+
+It also writes 33 files to `examples/demo_output/` — `hypnogram.csv`,
+`wake_sleep.csv`, `run.json` and a `plots/` folder for each of the two runs.
+Start with `plots/summary.png`.
+
+**Expected run time:** about **1 minute** on a normal desktop.
+
 Or from Python:
 
 ```python
@@ -72,7 +123,9 @@ scores. Unweighted on purpose: REM is a small fraction of any recording, so
 weighting by duration lets good WAKE/NREM performance hide a method that misses
 REM entirely.
 
-## Score a recording
+## Instructions for use
+
+To score your own recording:
 
 ```python
 import nyx
@@ -347,6 +400,28 @@ config = nyx.load_config("results/mouse01/run.json")
 Cluster ids are renumbered by spectral content, so a saved mapping means the same thing on every
 run. Without that, replaying saved parameters can attach stage names to the
 wrong clusters.
+
+### Reproducing the paper
+
+The datasets in the manuscript are public; where each one comes from is listed
+in [`examples/README.md`](examples/README.md), and Nyx ships a **recipe** for
+each, so a dataset needs a root directory and a recording name and nothing
+else:
+
+```python
+from nyx.datasets import list_datasets, load_dataset
+recording, reference = load_dataset("dodh", data_root="/path/to/data",
+                                    recording_name="...")
+```
+
+[`examples/03_score_rodents.ipynb`](examples/03_score_rodents.ipynb) reproduces
+a single recording of the Oxford mouse benchmark end to end, against its
+ten-expert consensus, and [`04_score_humans.ipynb`](examples/04_score_humans.ipynb)
+does the same for a human PSG.
+
+The analysis code that produces the manuscript's figures and tables is being
+refactored to use this package and will be deposited separately; it is not part
+of this repository.
 
 ---
 
