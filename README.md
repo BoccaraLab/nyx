@@ -2,16 +2,13 @@
 
 # Nyx
 
-A flexible framework for sleep scoring across species, lifespan and modalities.
+Nyx is a flexible framework for sleep scoring across species, lifespan and modalities.
 
 Nyx separates wake from sleep using EMG power, then splits sleep into stages by
 clustering a PCA of the EEG spectrogram. It needs **no training data and no
 manually scored examples** — which is what lets it work on species that have no
 scoring standard, and on recordings nobody has scored yet.
 
-Rodent scoring (Wake/NREM/REM) and human scoring (five stages) are the same
-code. They differ in how many clustering steps run, which is configuration, not
-a different pipeline.
 
 If you use Nyx, please cite the [preprint](https://www.biorxiv.org/content/10.64898/2026.07.24.740558v1).
 
@@ -33,21 +30,15 @@ three.
 pip install -e ".[full]"
 ```
 
-## Try it without any data
+## Demo
 
 ```bash
 python examples/run_demo.py
 ```
 
-No downloads, no data access. It scores a synthetic recording, then repeats the
+The demo scores a synthetic recording, then repeats the
 exercise on one carrying mains interference and saturated signal at both ends —
 showing the signal check finding both problems and what fixing them is worth:
-
-```
-clean recording                        MF1 0.993
-messy recording, nothing fixed         MF1 0.813
-messy recording, notch + trim applied  MF1 0.993
-```
 
 Every figure lands in `examples/demo_output/`; start with `plots/summary.png`.
 Or from Python:
@@ -78,7 +69,7 @@ assignment is wrong however clean the clusters look.
 
 Agreement is reported as **MF1**, the unweighted mean of the per-stage F1
 scores. Unweighted on purpose: REM is a small fraction of any recording, so
-weighting by duration lets good wake/NREM performance hide a method that misses
+weighting by duration lets good WAKE/NREM performance hide a method that misses
 REM entirely.
 
 ## Score a recording
@@ -117,10 +108,6 @@ In [`examples/`](examples/). The first two need **no data at all**:
 | [`02_signal_check`](examples/02_signal_check.ipynb) | nothing | mains interference and artefacts, and what fixing them is worth |
 | [`03_score_rodents`](examples/03_score_rodents.ipynb) | one 78 MB download | a real mouse recording against a ten-expert consensus |
 | [`04_score_humans`](examples/04_score_humans.ipynb) | a human PSG | the human pipeline start to end: four steps, five stages, and collapsing to coarser ones |
-
-Start with `01`. Note that the synthetic signal used in `01`–`02` is built to
-contain exactly the structure nyx looks for, so it scores near-perfectly — it
-shows you the mechanics, not the accuracy. `03` is the honest one.
 
 ---
 
@@ -170,16 +157,13 @@ the scoring.
 Clusters can also be assigned by hand: draw round a group of points in the
 scatter and give them a stage, for the cases clustering will not get on its own.
 
-Every section explains itself behind the **?** next to its title.
-
 The GUI runs the same functions the notebooks do — no second implementation.
 On the Oxford benchmark it reproduces `03_score_rodents` segment for segment.
 Nothing in it is required: the notebooks and `score_recording` are unchanged.
 
 Its views come from [ephyviewer](https://github.com/NeuralEnsemble/ephyviewer),
 used as published — the sleep-specific parts (a scalogram in dB, the curation
-shortcuts) are subclasses in [`nyx/gui/viewers.py`](src/nyx/gui/viewers.py)
-rather than a patched copy, so there is no fork to keep in step.
+shortcuts) are subclasses in [`nyx/gui/viewers.py`](src/nyx/gui/viewers.py).
 
 ---
 
@@ -195,10 +179,9 @@ print(check.summary())
 
 This answers the three questions that come before scoring: is the signal usable,
 does it need a notch filter, and where should the analysis window start and end.
-Mains interference is measured rather than eyeballed —
-`check.suggested_notch()` returns `50`, `60` or `None`.
+Mains interference is measured by `check.suggested_notch()` returns `50`, `60` or `None`.
 
-## Four decisions are yours
+## Four decision points
 
 Nyx is not a black box, and four points in it are genuine judgement calls. Each
 has an automatic default and an explicit override:
@@ -210,9 +193,8 @@ has an automatic default and an explicit override:
 | clustering settings | `DEFAULT_CLUSTERING` | the `clustering` params section |
 | which cluster is which stage | ordered by spectral content | `cluster_overrides={...}` |
 
-Expect to adjust the last two per recording — that is normal use, not a sign
-something has gone wrong. Run one recording, look at the EMG histogram and the
-per-cluster spectra, and tune. The defaults are reasonable, not optimal.
+Expect to adjust the last two per recording — that is normal use. Run one recording, look at the EMG histogram and the
+per-cluster spectra, and tune.
 
 ---
 
@@ -362,8 +344,7 @@ it re-runs the scoring exactly, with nothing left to decide:
 config = nyx.load_config("results/mouse01/run.json")
 ```
 
-Cluster ids are renumbered by spectral content rather than by whatever order the
-clustering algorithm produced, so a saved mapping means the same thing on every
+Cluster ids are renumbered by spectral content, so a saved mapping means the same thing on every
 run. Without that, replaying saved parameters can attach stage names to the
 wrong clusters.
 
