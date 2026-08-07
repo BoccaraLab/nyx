@@ -353,10 +353,22 @@ wrong clusters.
 ## Tests
 
 ```bash
-pytest
+pip install -e ".[dev]"
+pytest -m "not gui"        # the library
 ```
 
 The suite runs on synthetic signals with a known hypnogram, so it needs no data.
+
+The GUI tests need a Qt binding and run offscreen:
+
+```bash
+pip install -e ".[full,dev-gui]"
+pytest                     # everything
+```
+
+`pytest-qt` is in `dev-gui` rather than `dev` on purpose: it refuses to start
+when no Qt binding is importable, so having it in `dev` would stop a Qt-free
+checkout running even the library tests.
 
 ## Citing
 

@@ -69,8 +69,14 @@ full = [
 ]
 dev = [
     "pytest>=7",
-    "pytest-qt>=4.2",
     "ruff>=0.4",
+]
+# Developing the GUI. pytest-qt deliberately does *not* live in `dev`: it
+# refuses to start at all when no Qt binding is importable, so a Qt-free
+# checkout with `dev` installed could not run even the library tests.
+dev-gui = [
+    "nyx-sleep[gui,dev]",
+    "pytest-qt>=4.2",
 ]
 
 [project.scripts]
