@@ -18,12 +18,12 @@ side is usually right for the scatter and the spectra.
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -36,7 +36,13 @@ import nyx
 from nyx.gui.panels import MplPanel
 from nyx.gui.session import Stage
 from nyx.gui.tabs.base import Tab
-from nyx.gui.widgets import ClusteringForm, PostprocessForm, StageTable
+from nyx.gui.widgets import (
+    ClusteringForm,
+    PostprocessForm,
+    Section,
+    StageTable,
+    help_label,
+)
 from nyx.stages import STAGE_ROW_ORDER
 
 __all__ = ["SleepTab"]
@@ -61,7 +67,18 @@ class SleepTab(Tab):
     def build_controls(self) -> list:
         self._built_for = False
 
-        pca_box = QGroupBox("Components")
+        pca_box = Section(
+            "Components",
+            "How many principal components the PCA keeps. Changing it "
+            "recomputes the PCA, which is the slow part -- minutes on a "
+            "night.\n\n"
+            "Smoothing is display only: it smooths the drawn spectra, never "
+            "the data they were computed from.\n\n"
+            "If PC1 carries more than about 90% of the variance, the "
+            "spectrogram is dominated by something other than sleep and the "
+            "split that follows will not mean much -- go back to the signal "
+            "check.",
+        )
         pca_form = QFormLayout(pca_box)
         self.components = QSpinBox()
         self.components.setRange(2, 50)
@@ -81,7 +98,7 @@ class SleepTab(Tab):
 
         self.variance = QLabel()
         self.variance.setWordWrap(True)
-        self.variance.setStyleSheet("color: palette(mid);")
+        self.variance.setStyleSheet("font-size: 11px;")
         pca_form.addRow("", self.variance)
 
         self.clustering = ClusteringForm()
@@ -90,31 +107,38 @@ class SleepTab(Tab):
         recluster.setMinimumHeight(28)
         recluster.clicked.connect(self._recluster)
 
-        naming_box = QGroupBox("Names")
-        naming_layout = QVBoxLayout(naming_box)
-        naming_note = QLabel(
-            "One row per cluster, in centroid order. Name them here -- "
-            "renaming never re-clusters, so changing your mind is free."
+        naming_box = Section(
+            "Names",
+            "One row per cluster, in centroid order, with its position in PC "
+            "space and how many epochs it holds.\n\n"
+            "Read the per-cluster spectra to decide which is which: NREM has "
+            "more delta (1-4 Hz), REM a theta peak around 6-9 Hz. Renaming "
+            "never re-clusters, so changing your mind costs nothing.\n\n"
+            "A cluster you have not decided on stays UNCLASSIFIED and is left "
+            "out of the scored hypnogram rather than being folded into a "
+            "stage it may not belong to.",
         )
-        naming_note.setWordWrap(True)
-        naming_note.setStyleSheet("color: palette(mid);")
-        naming_layout.addWidget(naming_note)
+        naming_layout = QVBoxLayout(naming_box)
 
         self.table = StageTable()
         self.table.changed.connect(self._rename)
         self.table.setMinimumHeight(160)
         naming_layout.addWidget(self.table)
 
-        manual_box = QGroupBox("Assign by hand")
-        manual_layout = QVBoxLayout(manual_box)
-        manual_note = QLabel(
-            "Draw round a group of points in the scatter and give it a stage. "
-            "For the cases clustering will not get on its own -- a REM cluster "
-            "that merged into NREM, say."
+        manual_box = Section(
+            "Assign by hand",
+            "Draw round a group of points in the cluster scatter and give them "
+            "a stage, for the cases clustering will not get on its own -- a "
+            "REM cluster that merged into NREM, say.\n\n"
+            "Pick the stage, press Draw, then click in the scatter to place "
+            "the corners of a shape around the points you want. Press Draw "
+            "again to finish, or press enter or space with the mouse over the "
+            "plot. Escape starts the shape over.\n\n"
+            "Assignments made this way survive renaming and reclustering, and "
+            "are recorded in run.json -- a scoring a person touched should not "
+            "claim to be automatic.",
         )
-        manual_note.setWordWrap(True)
-        manual_note.setStyleSheet("color: palette(mid);")
-        manual_layout.addWidget(manual_note)
+        manual_layout = QVBoxLayout(manual_box)
 
         row = QWidget()
         row_layout = QHBoxLayout(row)
@@ -123,11 +147,11 @@ class SleepTab(Tab):
         self.lasso_stage.addItems(list(STAGE_ROW_ORDER))
         self.lasso_stage.setCurrentText("REM")
         row_layout.addWidget(self.lasso_stage, 1)
-        self.lasso = QPushButton("Lasso")
+        self.lasso = QPushButton("Draw")
         self.lasso.setCheckable(True)
         self.lasso.setToolTip(
-            "Click points in the scatter to trace a polygon; press enter or "
-            "space to close it. Escape starts over."
+            "Click in the scatter to place corners. Press Draw again to "
+            "finish, or enter/space over the plot. Escape starts over."
         )
         self.lasso.toggled.connect(self._toggle_lasso)
         row_layout.addWidget(self.lasso)
@@ -137,9 +161,7 @@ class SleepTab(Tab):
         clear_manual.clicked.connect(self._clear_manual)
         manual_layout.addWidget(clear_manual)
 
-        self.manual_note = QLabel()
-        self.manual_note.setWordWrap(True)
-        self.manual_note.setStyleSheet("color: palette(mid);")
+        self.manual_note = help_label("")
         manual_layout.addWidget(self.manual_note)
 
         self.use_postprocess = QCheckBox("apply the postprocessing rules")
@@ -218,13 +240,28 @@ class SleepTab(Tab):
         points = clusters.features_scaled[:, :2]
 
         self._selector = PolygonSelector(scatter_ax, points, verbose=False)
+        # Closing it from the keyboard should assign, not just draw a shape.
+        canvas_id = figure.canvas.mpl_connect(
+            "key_press_event", self._on_polygon_key
+        )
+        self._selector_key_id = canvas_id
+
+        # matplotlib delivers key_press_event only to a canvas that has
+        # keyboard focus, and a canvas in a dock never takes it by itself --
+        # which is why enter did nothing.
+        canvas = figure.canvas
+        canvas.setFocusPolicy(Qt.StrongFocus)
+        canvas.setFocus()
+
+        self.lasso.setText("Finish")
         self.manual_note.setText(
-            "Click to place vertices, enter or space to close, escape to "
-            "start over. Then press Lasso again."
+            "Click to place corners. Enter or space closes the shape, escape "
+            "starts over, or press Finish."
         )
         self.status.emit("Draw round the points you want.")
 
     def _finish_lasso(self) -> None:
+        self.lasso.setText("Draw")
         selector = getattr(self, "_selector", None)
         if selector is None:
             return
@@ -245,6 +282,11 @@ class SleepTab(Tab):
         self.status.emit(f"{count} epochs -> {stage}.")
         self._redraw_figures()
         self._fill_table()
+
+    def _on_polygon_key(self, event) -> None:
+        """Enter or space closed the polygon -- take the selection."""
+        if event.key in ("enter", "return", " ") and self.lasso.isChecked():
+            self.lasso.setChecked(False)   # -> _finish_lasso
 
     def _clear_manual(self) -> None:
         self.session.clear_manual_epochs()

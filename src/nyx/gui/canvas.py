@@ -202,6 +202,11 @@ class FigureView(QWidget):
     def _release(self) -> None:
         for widget in (self._toolbar, self._canvas):
             if widget is not None:
+                # hide() first: setParent(None) on a *visible* widget makes it
+                # a top-level window, so it flashes up on screen in the gap
+                # before deleteLater runs. Redrawing a tab did that half a
+                # dozen times.
+                widget.hide()
                 self._layout.removeWidget(widget)
                 widget.setParent(None)
                 widget.deleteLater()

@@ -69,6 +69,10 @@ class DockHost(MainViewer):
             return
         entry["widget"].close()
         self.removeDockWidget(entry["dock"])
+        # hide() before setParent(None): an unparented visible widget is a
+        # top-level window, and it shows itself in the gap before deleteLater
+        # runs. That is where the flurry of windows came from.
+        entry["dock"].hide()
         entry["dock"].setParent(None)
         entry["dock"].deleteLater()
 

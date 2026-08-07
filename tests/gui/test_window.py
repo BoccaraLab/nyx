@@ -326,7 +326,6 @@ def test_the_text_panels_are_along_the_bottom(scored_window):
     for title, panel in (
         ("Recording", "what was loaded"),
         ("Signal check", "measurements"),
-        ("Result", "agreement"),
     ):
         tab = tab_named(scored_window, title)
         dock = tab.docks.viewers[panel]["dock"]
@@ -527,15 +526,103 @@ def test_the_result_tab_hides_the_reference_until_asked(scored_window):
     assert "reference" in tab.docks.viewers
 
 
-def test_the_reference_cannot_be_edited(scored_window):
-    from ephyviewer import EpochViewer
-
+def test_the_reference_is_drawn_the_same_way_as_the_scoring(scored_window):
     tab = tab_named(scored_window, "Result")
     tab.show_reference.setChecked(True)
 
-    # A viewer, not an encoder: editing the thing you are comparing against
-    # would make the comparison meaningless.
-    assert isinstance(tab.docks.panel("reference"), EpochViewer)
+    reference = tab.docks.panel("reference")
+    mine = tab.docks.panel("hypnogram")
+
+    # The same widget, so flipping between the tabs compares like with like...
+    assert type(reference) is type(mine)
+    # ...but read-only, since editing what you compare against would make the
+    # comparison meaningless.
+    assert reference.read_only is True
+
+
+def test_the_agreement_table_comes_and_goes_with_the_reference(scored_window):
+    tab = tab_named(scored_window, "Result")
+
+    assert "agreement" not in tab.docks.viewers
+
+    tab.show_reference.setChecked(True)
+    assert "agreement" in tab.docks.viewers
+
+    tab.show_reference.setChecked(False)
+    assert "agreement" not in tab.docks.viewers
+    assert "reference" not in tab.docks.viewers
+
+
+def test_rebuilding_panels_opens_no_stray_windows(scored_window, qtbot):
+    """setParent(None) on a visible widget makes it a window of its own.
+
+    Redrawing a tab did that several times over, so windows flashed up and
+    vanished on every change.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    tab = tab_named(scored_window, "Signal check")
+    before = {id(w) for w in QApplication.topLevelWidgets()}
+
+    tab.scalogram.setChecked(True)
+    tab.scalogram.setChecked(False)
+    qtbot.wait(20)
+
+    appeared = [
+        w for w in QApplication.topLevelWidgets()
+        if id(w) not in before and w.isVisible()
+    ]
+    assert appeared == []
+
+
+def test_the_warning_banner_can_be_dismissed(scored_window):
+    from PySide6.QtWidgets import QPushButton
+
+    tab = tab_named(scored_window, "Sleep stages")
+    tab.show_warnings(["something worth noticing"])
+    assert not tab.warnings.isHidden()
+
+    dismiss = tab.warnings.findChildren(QPushButton)[0]
+    assert dismiss.text() == "Dismiss"
+    dismiss.click()
+
+    assert tab.warnings.isHidden()
+
+
+def test_every_section_explains_itself(scored_window):
+    """The explanations moved behind a ``?``; none of them got lost."""
+    from nyx.gui.widgets import Section
+
+    for tab in scored_window.tabs:
+        sections = tab.findChildren(Section)
+        assert sections, f"{tab.title} has no sections"
+        assert all(s.help_text for s in sections), f"{tab.title} has a bare section"
+
+
+def test_the_polygon_can_be_closed_from_the_keyboard(scored_window, qtbot):
+    """matplotlib only sends key events to a canvas that has focus, and a
+    canvas in a dock never takes it by itself -- so enter did nothing."""
+    from matplotlib.backend_bases import KeyEvent
+
+    tab = tab_named(scored_window, "Sleep stages")
+    tab.lasso.setChecked(True)
+
+    assert tab.lasso.text() == "Finish"
+    canvas = tab.clusters_panel.view.figure.canvas
+    assert canvas.focusPolicy() != Qt_NoFocus()
+
+    canvas.callbacks.process(
+        "key_press_event", KeyEvent("key_press_event", canvas, "enter")
+    )
+
+    assert not tab.lasso.isChecked()
+    assert tab.lasso.text() == "Draw"
+
+
+def Qt_NoFocus():
+    from PySide6.QtCore import Qt
+
+    return Qt.NoFocus
 
 
 def test_the_summary_figures_open_as_windows_when_you_save(scored_window, tmp_path):

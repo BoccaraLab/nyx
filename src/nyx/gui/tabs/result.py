@@ -16,13 +16,12 @@ from __future__ import annotations
 
 import os
 
-from ephyviewer import EpochViewer, TraceViewer
+from ephyviewer import TraceViewer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -34,9 +33,10 @@ from PySide6.QtWidgets import (
 import nyx
 from nyx.gui.panels import TextPanel
 from nyx.gui.session import Stage
-from nyx.gui.sources import component_source, epoch_source, trace_sources
+from nyx.gui.sources import component_source, trace_sources
 from nyx.gui.tabs.base import Tab
 from nyx.gui.viewers import make_timefreq_viewer
+from nyx.gui.widgets import Section, help_label
 
 __all__ = ["ResultTab"]
 
@@ -54,7 +54,13 @@ class ResultTab(Tab):
     def build_controls(self) -> list:
         self._built_for = None
 
-        view_box = QGroupBox("Spectrogram")
+        view_box = Section(
+            "Spectrogram",
+            "The wavelet view is a Morlet scalogram in dB, the same transform "
+            "nyx's scalogram feature backend computes. It is far easier to "
+            "read than the Fourier view and much slower -- it recomputes on "
+            "every scroll.",
+        )
         view_form = QFormLayout(view_box)
         self.scalogram = QCheckBox("wavelet (slower, easier to read)")
         self.scalogram.setToolTip(
@@ -71,7 +77,15 @@ class ResultTab(Tab):
         self.palette.currentTextChanged.connect(self._set_palette)
         view_form.addRow("colours", self.palette)
 
-        compare_box = QGroupBox("Compare")
+        compare_box = Section(
+            "Compare",
+            "Adds the manual scoring as a second hypnogram, tabbed with "
+            "yours, and the agreement table beside it. The two panels are the "
+            "same widget, so flipping between the tabs compares like with "
+            "like.\n\n"
+            "The reference cannot be edited. Scroll to where the two "
+            "disagree -- that is the thing a notebook cannot show you.",
+        )
         compare_layout = QVBoxLayout(compare_box)
         self.show_reference = QPushButton("Show the reference")
         self.show_reference.setCheckable(True)
@@ -83,23 +97,42 @@ class ResultTab(Tab):
         compare_layout.addWidget(self.show_reference)
         self.compare_note = QLabel()
         self.compare_note.setWordWrap(True)
-        self.compare_note.setStyleSheet("color: palette(mid);")
+        self.compare_note.setStyleSheet("font-size: 11px;")
         compare_layout.addWidget(self.compare_note)
 
-        edit_box = QGroupBox("Editing")
+        edit_box = Section(
+            "Corrections",
+            "The hypnogram panel is editable: select a stretch and press the "
+            "key for a stage, or drag an epoch boundary.\n\n"
+            "Nothing you change there counts until you apply it. Press the "
+            "button below, or Ctrl+S with the hypnogram panel focused -- they "
+            "do the same thing.\n\n"
+            "Once applied, the corrected hypnogram is what gets saved, "
+            "agreement is recomputed against it, and run.json records that a "
+            "person changed it.",
+        )
         edit_layout = QFormLayout(edit_box)
-        self.edited_note = QLabel("Not edited.")
-        self.edited_note.setWordWrap(True)
+        self.edited_note = help_label("No corrections applied.")
         edit_layout.addRow("", self.edited_note)
-        keep = QPushButton("Keep my edits")
+        keep = QPushButton("Apply my corrections")
         keep.setToolTip(
-            "Take the hypnogram as it is now. Also what Ctrl+S in the "
-            "hypnogram panel does."
+            "Take the hypnogram as you have edited it. Same as Ctrl+S in the "
+            "hypnogram panel. Until you press this, your edits are not part "
+            "of the result."
         )
         keep.clicked.connect(self._keep_edits)
         edit_layout.addRow("", keep)
 
-        save_box = QGroupBox("Save")
+        save_box = Section(
+            "Save",
+            "Writes the hypnogram, the wake/sleep split, the EMG power and "
+            "run.json -- which records every decision, so the run replays "
+            "without anything left to choose.\n\n"
+            "Granularities write extra hypnograms at coarser stage counts, "
+            "for comparing a five-stage scoring against a three-stage one.\n\n"
+            "The summary and confusion matrix open as their own windows when "
+            "you save.",
+        )
         save_form = QFormLayout(save_box)
         self.output = QLineEdit()
         self.output.setPlaceholderText("results/<recording>")
@@ -190,8 +223,10 @@ class ResultTab(Tab):
             rules=self.session.postprocess_rules(),
         )
         self.docks.add(self.encoder)
-        self.docks.add(self.agreement)   # bottom, by TextPanel default
 
+        # The agreement table comes with the reference: without one there is
+        # nothing to agree with, and it is only worth the space when you are
+        # comparing.
         if self.show_reference.isChecked():
             self._add_reference(offset)
 
@@ -211,26 +246,31 @@ class ResultTab(Tab):
         A viewer rather than an encoder: it is the thing being compared
         against, and editing it would make the comparison meaningless.
         """
+        from nyx.gui.review import NyxEpochSource
+        from nyx.gui.viewers import NyxEpochEncoder
         from nyx.metrics import normalise_labels
 
         reference = self.session.result().reference
         if reference is None or "reference" in self.docks.viewers:
             return
-        self.docks.add(
-            EpochViewer(
-                source=epoch_source(
-                    normalise_labels(reference), "reference", offset
-                ),
-                name="reference",
-            ),
-            tabify_with="hypnogram",
+
+        # The same widget as the scoring, so the two read identically when you
+        # flip between the tabs -- but read-only, since editing what you are
+        # comparing against would make the comparison meaningless.
+        source = NyxEpochSource(
+            normalise_labels(reference), name="reference", t_offset=offset
         )
+        encoder = NyxEpochEncoder(source=source, name="reference", rules=[])
+        encoder.make_read_only()
+        self.docks.add(encoder, tabify_with="hypnogram")
+        self.docks.add(self.agreement, tabify_with="reference")
 
     def _toggle_reference(self, on: bool) -> None:
         if not self.session.has(Stage.STEPS):
             return
         if not on:
             self.docks.remove("reference")
+            self.docks.remove("agreement")
             self.compare_note.setText("")
             return
 
@@ -329,12 +369,13 @@ class ResultTab(Tab):
     def _update_readouts(self) -> None:
         result = self.session.result()
 
+        edited = self.session.was_edited()
         self.edited_note.setText(
-            "Edited by hand. That is what will be saved, and run.json records it."
-            if self.session.was_edited() else "Not edited."
+            "Corrections applied. These are what will be saved."
+            if edited else "No corrections applied."
         )
         self.edited_note.setStyleSheet(
-            "color: #e37400;" if self.session.was_edited() else "color: palette(mid);"
+            "color: #e0a34a; font-size: 11px;" if edited else "font-size: 11px;"
         )
 
         self.agreement.set_text(

@@ -447,6 +447,36 @@ class NyxEpochEncoder(EpochEncoder):
             action.setShortcut(QT.QKeySequence(key))
             action.setToolTip(f"{tip}  ({key})")
 
+    def make_read_only(self) -> None:
+        """Show a hypnogram without letting it be changed.
+
+        For the reference: it has to look exactly like the scoring beside it,
+        which means being the same widget -- but editing the thing you are
+        comparing against would make the comparison meaningless.
+
+        The navigation stays, because moving through someone else's scoring
+        looking for where it disagrees is the whole point of showing it.
+        """
+        from PySide6.QtWidgets import QAbstractItemView
+
+        self.read_only = True
+
+        # Everything except the navigation: "< State", "State >" and the two
+        # curation jumps all end or begin with an angle bracket.
+        for action in self.toolbar.actions():
+            text = action.text() or ""
+            if text and not text.endswith(">") and not text.startswith("<"):
+                action.setEnabled(False)
+
+        table = getattr(self, "table_widget", None)
+        if table is not None:
+            table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
+    def on_label_clicked(self, *args, **kwargs):  # noqa: D102
+        if getattr(self, "read_only", False):
+            return
+        return super().on_label_clicked(*args, **kwargs)
+
     def set_rules(self, rules) -> None:
         self._rules = list(rules or [])
         self.refresh_flags()

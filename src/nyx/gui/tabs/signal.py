@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QPushButton,
     QWidget,
@@ -43,6 +42,7 @@ from nyx.gui.viewers import (
     spectrogram_params_from,
     timefreq_params_from,
 )
+from nyx.gui.widgets import Section
 
 __all__ = ["SignalTab"]
 
@@ -62,7 +62,13 @@ class SignalTab(Tab):
         self._seeded = False
 
         # -- checking
-        check_box = QGroupBox("Measure the signal")
+        check_box = Section(
+            "Measure the signal",
+            "Reports the sampling rate, how much of the recording is flat "
+            "or saturated, and how much power sits at 50 and 60 Hz.\n\n"
+            "The preview is how much signal to measure; 0 uses all of it, "
+            "which on a long recording is slow.",
+        )
         check_form = QFormLayout(check_box)
         self.preview = QDoubleSpinBox()
         self.preview.setRange(0.0, 1e7)
@@ -84,7 +90,16 @@ class SignalTab(Tab):
         check_form.addRow("", measure)
 
         # -- notch
-        notch_box = QGroupBox("Mains notch")
+        notch_box = Section(
+            "Mains notch",
+            "Mains hum at 50 or 60 Hz lands squarely inside the EMG band "
+            "of 30-100 Hz, where it inflates the very power that "
+            "separates wake from sleep. That is why the EMG is ticked and "
+            "the EEG is not: the EEG band usually stops below the mains "
+            "frequency, so notching it is often unnecessary.\n\n"
+            "Measure first -- it suggests a frequency, or tells you there "
+            "is no interference worth removing.",
+        )
         notch_form = QFormLayout(notch_box)
         self.notch = QComboBox()
         self.notch.addItems(["none", "50", "60"])
@@ -116,7 +131,18 @@ class SignalTab(Tab):
         notch_form.addRow("harmonics", self.harmonics)
 
         # -- what the spectrogram shows
-        view_box = QGroupBox("Time-frequency view")
+        view_box = Section(
+            "Time-frequency view",
+            "The wavelet view is a Morlet scalogram in dB, the same "
+            "transform nyx's scalogram backend computes. Far easier to "
+            "read than the Fourier view, and much slower.\n\n"
+            "Binsize is the window length of the transform and the epoch "
+            "length nyx scores on. ephyviewer's own default is 0.01 s, "
+            "which at these sampling rates is a single sample and shows "
+            "nothing -- these start from your parameters instead.\n\n"
+            "Changing them retunes the view. Apply to the params writes "
+            "them into the parameters so the scoring uses them too.",
+        )
         view_form = QFormLayout(view_box)
 
         self.scalogram = QCheckBox("wavelet (slower, easier to read)")
@@ -173,7 +199,15 @@ class SignalTab(Tab):
         view_form.addRow("", apply_settings)
 
         # -- window
-        window_box = QGroupBox("Analysis window")
+        window_box = Section(
+            "Analysis window",
+            "Recordings often start before the animal is connected and "
+            "end after it is disconnected. Flat or saturated ends drag "
+            "the scaling around for everything in between, so trimming "
+            "them is worth doing.\n\n"
+            "Scroll the traces to the stretch you want and press Use the "
+            "view as the window.",
+        )
         window_form = QFormLayout(window_box)
         self.whole = QCheckBox("the whole recording")
         self.whole.setChecked(True)

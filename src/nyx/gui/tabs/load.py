@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -36,6 +35,7 @@ from nyx.gui.filters import (
 from nyx.gui.panels import TextPanel
 from nyx.gui.session import Stage
 from nyx.gui.tabs.base import Tab
+from nyx.gui.widgets import Section
 
 __all__ = ["LoadTab"]
 
@@ -54,7 +54,18 @@ class LoadTab(Tab):
 
     def build_controls(self) -> list:
         # -- recording
-        recording_box = QGroupBox("Recording")
+        recording_box = Section(
+            "Recording",
+            "The file, and which two channels in it are the EEG and the "
+            "EMG. The channel lists are read out of the file itself, so "
+            "you pick from what is there rather than typing an index and "
+            "hoping.\n\n"
+            "Check the summary panel before moving on. EEG and EMG the "
+            "wrong way round gives a scoring that looks entirely "
+            "plausible and is wrong.\n\n"
+            "spikeinterface recordings are a folder rather than a file, "
+            "which is what the second browse button is for.",
+        )
         form = QFormLayout(recording_box)
 
         self.path = QLineEdit()
@@ -81,11 +92,19 @@ class LoadTab(Tab):
 
         self.channel_note = QLabel()
         self.channel_note.setWordWrap(True)
-        self.channel_note.setStyleSheet("color: palette(mid);")
+        self.channel_note.setStyleSheet("font-size: 11px;")
         form.addRow("", self.channel_note)
 
         # -- params
-        params_box = QGroupBox("Parameters")
+        params_box = Section(
+            "Parameters",
+            "Spectral settings, normalisation, and the structure of the "
+            "scoring steps. The presets ship with nyx -- mouse, rat, "
+            "human and the variants -- or point at your own JSON.\n\n"
+            "Which species you are scoring is a matter of how many "
+            "clustering steps run and what the clusters are called, not "
+            "of different code.",
+        )
         params_form = QFormLayout(params_box)
         self.preset = QComboBox()
         self.preset.addItems(nyx.available_params())
@@ -97,11 +116,19 @@ class LoadTab(Tab):
 
         self.params_note = QLabel()
         self.params_note.setWordWrap(True)
-        self.params_note.setStyleSheet("color: palette(mid);")
+        self.params_note.setStyleSheet("font-size: 11px;")
         params_form.addRow("", self.params_note)
 
         # -- reference
-        reference_box = QGroupBox("Manual scoring (optional)")
+        reference_box = Section(
+            "Manual scoring (optional)",
+            "A scoring to compare against. Entirely optional -- nyx needs "
+            "no training data, and scoring without a reference is the "
+            "normal case.\n\n"
+            "Epoch formats need the epoch length, and usually a label map "
+            "saying which number means which stage: 0=WAKE, 1=NREM1 and "
+            "so on.",
+        )
         reference_form = QFormLayout(reference_box)
         self.reference_path = QLineEdit()
         self.reference_path.setPlaceholderText("Leave empty to score without one")

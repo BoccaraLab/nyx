@@ -74,7 +74,7 @@ class Tab(QWidget):
         if self.subtitle:
             note = QLabel(self.subtitle)
             note.setWordWrap(True)
-            note.setStyleSheet("color: palette(mid);")
+            note.setStyleSheet("font-size: 11px;")
             outer.addWidget(note)
 
         self.warnings = WarningBanner()

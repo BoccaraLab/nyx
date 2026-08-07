@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
 from nyx.gui.session import Stage
 
 __all__ = [
+    "Section",
+    "help_label",
     "State",
     "StageBadge",
     "WarningBanner",
@@ -121,15 +123,22 @@ class WarningBanner(QFrame):
     nyx warns where a user must notice -- clusters it could not name, scoring
     without an EMG, clustering settings it did not recognise. On the command
     line those land on stderr. Here they would be lost.
+
+    The colours are fixed rather than taken from the palette: it has to read as
+    a warning in a dark theme as well as a light one, and the contrast that
+    works for both does not come out of either palette.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFrameShape(QFrame.StyledPanel)
         self.setStyleSheet(
-            "QFrame { background: #fff4e5; border: 1px solid #e37400;"
+            "QFrame { background: #4a3520; border: 1px solid #e0a34a;"
             " border-radius: 4px; }"
-            "QLabel { color: #7a4100; }"
+            "QLabel { color: #ffdca8; }"
+            "QPushButton { color: #ffdca8; background: transparent;"
+            " border: 1px solid #e0a34a; border-radius: 3px; padding: 3px 10px; }"
+            "QPushButton:hover { background: #5c4228; }"
         )
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
@@ -139,13 +148,12 @@ class WarningBanner(QFrame):
         self._label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self._label, 1)
 
-        from PySide6.QtWidgets import QToolButton
+        from PySide6.QtWidgets import QPushButton
 
-        close = QToolButton()
-        close.setText("✕")
-        close.setAutoRaise(True)
-        close.clicked.connect(self.hide)
-        layout.addWidget(close, 0, Qt.AlignTop)
+        dismiss = QPushButton("Dismiss")
+        dismiss.setToolTip("Hide this. It stays in the log.")
+        dismiss.clicked.connect(self.hide)
+        layout.addWidget(dismiss, 0, Qt.AlignTop)
 
         self.hide()
 
@@ -161,6 +169,75 @@ class WarningBanner(QFrame):
                 "\n\n".join(f"• {m}" for m in messages)
             )
         self.show()
+
+
+class Section(QGroupBox):
+    """A group box whose explanation is behind a ``?`` rather than on screen.
+
+    The paragraphs these replace were always visible, in a grey that a dark
+    theme renders unreadable and a light one renders as clutter. The text is
+    the same; it now waits until it is asked for -- hover the title, or press
+    the ``?``.
+    """
+
+    def __init__(self, title: str, help_text: str = "", parent=None):
+        super().__init__(title, parent)
+        self.help_text = help_text.strip()
+        self._button = None
+        if self.help_text:
+            self.setToolTip(self.help_text)
+            self._button = _HelpButton(title, self.help_text, self)
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt's spelling
+        # Kept in the top-right corner of the box, out of the form's way.
+        if self._button is not None:
+            size = self._button.sizeHint()
+            self._button.move(self.width() - size.width() - 6, 2)
+        super().resizeEvent(event)
+
+
+class _HelpButton(QWidget):
+    """A ``?`` that shows one paragraph of explanation."""
+
+    def __init__(self, title: str, text: str, parent=None):
+        from PySide6.QtWidgets import QHBoxLayout as _H
+        from PySide6.QtWidgets import QToolButton
+
+        super().__init__(parent)
+        self.title = title
+        self.text = text
+
+        layout = _H(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        button = QToolButton()
+        button.setText("?")
+        button.setAutoRaise(True)
+        button.setToolTip(text)
+        button.setCursor(Qt.WhatsThisCursor)
+        button.clicked.connect(self._explain)
+        layout.addWidget(button)
+
+    def _explain(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Information)
+        box.setWindowTitle(self.title)
+        box.setText(self.text)
+        box.exec()
+
+
+def help_label(text: str) -> QLabel:
+    """A one-line hint that stays legible in either theme.
+
+    ``palette(mid)`` is a mid grey chosen for borders, not for text, and in a
+    dark theme it is barely darker than the background. This is the normal
+    text colour, just smaller.
+    """
+    label = QLabel(text)
+    label.setWordWrap(True)
+    label.setStyleSheet("font-size: 11px;")
+    return label
 
 
 class LogPane(QPlainTextEdit):

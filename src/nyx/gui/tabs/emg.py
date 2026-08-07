@@ -31,7 +31,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
-    QGroupBox,
     QLabel,
     QPushButton,
     QVBoxLayout,
@@ -41,7 +40,7 @@ from nyx.gui.histogram import HistogramViewer, ThresholdLines
 from nyx.gui.session import Stage
 from nyx.gui.sources import power_source, trace_sources
 from nyx.gui.tabs.base import Tab
-from nyx.gui.widgets import monospace
+from nyx.gui.widgets import Section, help_label, monospace
 
 __all__ = ["EmgTab"]
 
@@ -63,7 +62,17 @@ class EmgTab(Tab):
         self._lines: ThresholdLines | None = None
         self._built_for = None
 
-        box = QGroupBox("Threshold")
+        box = Section(
+            "Threshold",
+            "Where the wake/sleep cut goes. Drag the red line on the "
+            "distribution or on the power trace -- they are the same number "
+            "shown twice. It should sit in the valley of the distribution "
+            "and track what the animal is obviously doing.\n\n"
+            "The no-signal cut marks power at or below it as signal loss "
+            "rather than deep sleep; 0 disables it.\n\n"
+            "Bouts shorter than the minimum are absorbed into their "
+            "neighbours. The bouts redraw when you let go of the line.",
+        )
         form = QFormLayout(box)
 
         self.threshold = QDoubleSpinBox()
@@ -110,7 +119,7 @@ class EmgTab(Tab):
 
         self.automatic_note = QLabel()
         self.automatic_note.setWordWrap(True)
-        self.automatic_note.setStyleSheet("color: palette(mid);")
+        self.automatic_note.setStyleSheet("font-size: 11px;")
         form.addRow("", self.automatic_note)
 
         # In the controls rather than a panel of its own: it is three lines,
@@ -118,20 +127,21 @@ class EmgTab(Tab):
         self.readout = QLabel()
         self.readout.setWordWrap(True)
         self.readout.setFont(monospace())
-        self.readout.setStyleSheet("color: palette(mid);")
+        self.readout.setStyleSheet("font-size: 11px;")
         form.addRow("", self.readout)
 
-        self.no_emg_box = QGroupBox("No EMG channel")
-        no_emg_layout = QVBoxLayout(self.no_emg_box)
-        note = QLabel(
-            "This recording has no EMG, so every epoch starts as SLEEP and "
-            "clustering has to find wake in the EEG alone -- expect noticeably "
-            "worse agreement, REM especially.\n\n"
+        self.no_emg_box = Section(
+            "No EMG channel",
+            "Wake has to be recovered from the EEG spectrum alone, where "
+            "quiet wake and REM look much alike, so expect noticeably worse "
+            "agreement -- REM especially.\n\n"
             "If the file has other wideband channels, nyx.emg_from_lfp builds "
-            "a surrogate from them, which is far better than nothing."
+            "a surrogate from them, which is far better than nothing.",
         )
-        note.setWordWrap(True)
-        no_emg_layout.addWidget(note)
+        no_emg_layout = QVBoxLayout(self.no_emg_box)
+        no_emg_layout.addWidget(help_label(
+            "Every epoch starts as SLEEP; clustering has to find wake itself."
+        ))
         self.no_emg_box.hide()
 
         return [box, self.no_emg_box]
@@ -162,9 +172,9 @@ class EmgTab(Tab):
 
         _eeg, emg_trace, offset = trace_sources(self.session.windowed())
 
-        # Top to bottom: the signal, the power it is summarised into, and
-        # the bouts that fall out of the cut. Reading downwards is reading the
-        # decision being made.
+        # Top to bottom, this is the decision being made, in order: the
+        # signal, the power it is summarised into, the distribution of that
+        # power with the cut on it, and the bouts that fall out of the cut.
         if emg_trace is not None:
             self.docks.add(TraceViewer(source=emg_trace, name="EMG"))
 
@@ -176,12 +186,12 @@ class EmgTab(Tab):
         _fix_range(self.power, -0.01, 1.01)
         self.docks.add(self.power)
 
-        if self.session.has(Stage.WAKE_SLEEP):
-            self.docks.add(self._encoder(offset))
-
         self.histogram = HistogramViewer(name="EMG distribution")
         self.histogram.set_values(emg.power, "EMG power (scaled)")
-        self.docks.add(self.histogram, location="right")
+        self.docks.add(self.histogram)
+
+        if self.session.has(Stage.WAKE_SLEEP):
+            self.docks.add(self._encoder(offset))
 
         # One value, two views. Dragging either moves both, which is the whole
         # point of having both.
@@ -195,12 +205,13 @@ class EmgTab(Tab):
         self.histogram.attach(self._lines)
         self._lines.add(self.power.plot, "h")
 
-        # The distribution is read across, not along; the traces need the width.
-        self.docks.resizeDocks(
-            [self.docks.viewers["EMG power"]["dock"],
-             self.docks.viewers["EMG distribution"]["dock"]],
-            [900, 340], Qt.Horizontal,
-        )
+        # The traces are read along, the distribution across; give the traces
+        # the height and leave the distribution enough to see the valley in.
+        names = ["EMG", "EMG power", "EMG distribution", "wake / sleep"]
+        docks = [self.docks.viewers[n]["dock"]
+                 for n in names if n in self.docks.viewers]
+        sizes = [300, 260, 220, 160][: len(docks)]
+        self.docks.resizeDocks(docks, sizes, Qt.Vertical)
 
     def _encoder(self, offset: float):
         """The wake/sleep bouts, editable, in nyx's stage colours.
