@@ -359,27 +359,64 @@ def test_the_histogram_can_be_resized(scored_window):
     assert histogram.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
 
 
-def test_more_clusters_than_names_does_not_wedge_the_tab(scored_window):
-    """The one that used to raise and leave no way back."""
+def recluster(window, tab, qtbot, n):
+    """Press Recluster the way a person does, and wait for the worker."""
+    tab.clustering.set_values({"method": "kmeans", "n_clusters": n})
+    with qtbot.waitSignal(window.jobs.done, timeout=120_000):
+        tab._recluster()
+    qtbot.waitUntil(lambda: not window.jobs.busy(), timeout=120_000)
+    qtbot.wait(50)
+
+
+@pytest.mark.parametrize("n", [3, 4, 2])
+def test_changing_the_cluster_count_keeps_the_panels_drawn(
+    scored_window, qtbot, n
+):
+    """The one that went blank and could not be recovered from.
+
+    Rebuilding the dock area closed the panels, which released their canvases
+    *and hid them*, and re-adding the same objects did not bring them back.
+    """
     tab = tab_named(scored_window, "Sleep stages")
 
-    tab.clustering.set_values({"method": "kmeans", "n_clusters": 4})
-    scored_window.session.set_cluster_overrides(None)
-    scored_window.session.set_clustering(tab.clustering.values())
-    scored_window.session.compute_through(Stage.STEPS)
-    tab.safe_refresh()
+    recluster(scored_window, tab, qtbot, n)
 
-    assert tab.table.table.rowCount() == 4
-    tab._rename()  # must not raise
+    panel = tab.clusters_panel
+    assert not panel.isHidden()
+    assert panel.view.figure is not None and panel.view.figure.axes
+    assert panel.view.canvas is not None
+    assert tab.table.table.rowCount() == n
 
-    # ...and back again.
-    tab.clustering.set_values({"method": "kmeans", "n_clusters": 2})
-    scored_window.session.set_cluster_overrides(None)
-    scored_window.session.set_clustering(tab.clustering.values())
-    scored_window.session.compute_through(Stage.STEPS)
-    tab.safe_refresh()
+
+def test_every_cluster_ends_up_named_even_when_there_are_more_than_names(
+    scored_window, qtbot
+):
+    """Extras become UNCLASSIFIED rather than staying provisional.
+
+    Left as C2, C3 they are unscored, and nyx warns about it on every single
+    recompute. The table has a row for each, so those names are pushed back --
+    the ones you have not decided on say so.
+    """
+    tab = tab_named(scored_window, "Sleep stages")
+
+    recluster(scored_window, tab, qtbot, 4)
+
+    mapping = scored_window.session.cluster_to_stage()
+    assert len(mapping) == 4
+    assert not any(
+        str(v).startswith("C") and str(v)[1:].isdigit() for v in mapping.values()
+    )
+    assert "UNCLASSIFIED" in mapping.values()
+
+
+def test_the_cluster_count_can_be_taken_back_down(scored_window, qtbot):
+    tab = tab_named(scored_window, "Sleep stages")
+
+    recluster(scored_window, tab, qtbot, 4)
+    recluster(scored_window, tab, qtbot, 2)
 
     assert tab.table.table.rowCount() == 2
+    assert set(scored_window.session.cluster_to_stage().values()) == {"REM", "NREM"}
 
 
 def test_the_table_is_the_only_thing_that_names_clusters(scored_window):

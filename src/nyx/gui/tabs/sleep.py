@@ -59,7 +59,7 @@ class SleepTab(Tab):
     controls_width = 360
 
     def build_controls(self) -> list:
-        self._built_for = None
+        self._built_for = False
 
         pca_box = QGroupBox("Components")
         pca_form = QFormLayout(pca_box)
@@ -173,23 +173,17 @@ class SleepTab(Tab):
     # -- panels ------------------------------------------------------------
 
     def _build_viewers(self) -> None:
-        """Rebuild the dock area when the underlying data changes.
-
-        Keyed on the clustering, so renaming -- which changes only the labels
-        -- swaps the hypnogram in place and leaves the scroll position alone.
-        """
-        if not self.session.has(Stage.STEPS):
+        """Create the panels. Once."""
+        if self._built_for:
             return
-        key = (id(self.session.pca()), id(self.session.clusters()))
-        if self._built_for == key:
-            return
+        self._built_for = True
 
-        self.docks.clear()
-        self._built_for = key
-
-        # Clustering panels only. The traces and the hypnogram belong to the
-        # tabs either side of this one; here they are just competing for width
-        # with the scatter you are actually reading.
+        # Built once, and never rebuilt. These three panels always show the
+        # same *things*; only their contents change, and _redraw_figures
+        # handles that. Tearing them down and putting them back on every
+        # reclustering closed them -- which released their canvases and hid
+        # them, so the tab went blank -- and threw away whatever layout you
+        # had dragged them into.
         self.docks.add(self.clusters_panel)
         self.docks.add(self.features_panel, tabify_with="clusters and spectra")
         self.docks.add(self.pca_panel, tabify_with="other dimensions")
@@ -385,6 +379,21 @@ class SleepTab(Tab):
             self.table.set_table(
                 frame, _stage_choices(self.session), defaults=defaults
             )
+
+        # A clustering with more clusters than names leaves the extras with
+        # provisional ids -- C1, C2 -- and unscored, which is nyx telling you
+        # to name them. The table now has a row for each, so push those names
+        # straight back: every cluster ends up explicitly mapped, the ones you
+        # have not decided on as UNCLASSIFIED, and the warning stops repeating
+        # on every recompute.
+        if any(_is_provisional(s) for s in self.session.cluster_to_stage().values()):
+            self._rename()
+
+
+def _is_provisional(stage: str) -> bool:
+    """``C0``, ``C1`` ... -- what assign_stages calls a cluster it cannot name."""
+    text = str(stage)
+    return len(text) > 1 and text[0] == "C" and text[1:].isdigit()
 
 
 def _stage_choices(session) -> list[str]:

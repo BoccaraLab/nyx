@@ -57,6 +57,10 @@ class DockHost(MainViewer):
         if preferred and not {"location", "tabify_with", "split_with"} & set(kwargs):
             kwargs["location"] = preferred
         self.add_view(widget, **kwargs)
+        # A panel that was removed had close() called on it, which hides it as
+        # well as stopping its threads. Re-adding the same object has to undo
+        # that or the dock comes back empty.
+        widget.show()
         return widget
 
     def remove(self, name: str) -> None:
