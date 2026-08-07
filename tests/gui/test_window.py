@@ -12,21 +12,37 @@ pytestmark = pytest.mark.gui
 
 
 @pytest.fixture
-def window(qtbot, session):
-    from nyx.gui.mainwindow import MainWindow
+def windows(qtbot):
+    """Build main windows and close them deterministically.
 
-    w = MainWindow(session)
-    qtbot.addWidget(w)
-    return w
+    Each tab's dock area holds ephyviewer views with worker threads that only
+    stop on closeEvent, and a dock area is a child widget, so it never gets
+    one unless the window is actually closed.
+    """
+    built = []
+
+    def make(session):
+        from nyx.gui.mainwindow import MainWindow
+
+        w = MainWindow(session)
+        built.append(w)
+        qtbot.addWidget(w)
+        return w
+
+    yield make
+
+    for w in built:
+        w.close()
 
 
 @pytest.fixture
-def scored_window(qtbot, scored):
-    from nyx.gui.mainwindow import MainWindow
+def window(windows, session):
+    return windows(session)
 
-    w = MainWindow(scored)
-    qtbot.addWidget(w)
-    return w
+
+@pytest.fixture
+def scored_window(windows, scored):
+    return windows(scored)
 
 
 def badges(window):
@@ -55,13 +71,11 @@ def test_a_tab_refreshes_on_a_finished_session(scored_window, index):
 
 
 @pytest.mark.parametrize("index", range(5))
-def test_a_tab_refreshes_on_an_empty_session(qtbot, index):
+def test_a_tab_refreshes_on_an_empty_session(windows, index):
     """Every tab is reachable before its inputs exist, so this is normal."""
-    from nyx.gui.mainwindow import MainWindow
     from nyx.gui.session import ScoringSession
 
-    w = MainWindow(ScoringSession(nyx.demo_params()))
-    qtbot.addWidget(w)
+    w = windows(ScoringSession(nyx.demo_params()))
 
     w.tabs[index].safe_refresh()  # must not raise
 
@@ -164,6 +178,91 @@ def test_warnings_reach_the_current_tab(scored_window):
     # isHidden rather than isVisible: nothing is "visible" while the window
     # itself is not shown, which offscreen it never is.
     assert not scored_window.tabs[3].warnings.isHidden()
+
+
+# ---------------------------------------------------------------------------
+# The panels: interactive, and rearrangeable
+# ---------------------------------------------------------------------------
+
+
+EXPECTED_PANELS = {
+    "Signal check": {"EEG", "EEG spectrum"},
+    "EMG threshold": {"EMG distribution", "EMG power", "wake / sleep"},
+    "Sleep stages": {"clusters and spectra", "components", "hypnogram"},
+    "Result": {"EEG", "EEG spectrum", "hypnogram"},
+}
+
+
+@pytest.mark.parametrize("title, expected", EXPECTED_PANELS.items())
+def test_each_tab_docks_the_panels_it_should(scored_window, title, expected):
+    tab = next(t for t in scored_window.tabs if t.title == title)
+    scored_window.rail.setCurrentRow(scored_window.tabs.index(tab))
+    tab.safe_refresh()
+
+    assert expected <= set(tab.docks.viewers)
+
+
+def test_the_panels_can_be_dragged_side_by_side(scored_window):
+    # Nesting is what lets two panels sit beside each other rather than only
+    # above and below. Without it the layout is not rearrangeable in the way
+    # ephyviewer's own window is.
+    for tab in scored_window.tabs:
+        assert tab.docks.isDockNestingEnabled()
+
+
+def test_every_tab_has_a_navigation_toolbar(scored_window):
+    for tab in scored_window.tabs:
+        assert tab.docks.navigation_toolbar is not None
+
+
+def test_the_views_share_one_clock(scored_window):
+    """Scrolling one panel has to scroll the rest, or they cannot be compared."""
+    tab = next(t for t in scored_window.tabs if t.title == "Result")
+    scored_window.rail.setCurrentRow(scored_window.tabs.index(tab))
+    tab.safe_refresh()
+
+    tab.docks.on_time_changed(600.0)
+
+    assert all(
+        entry["widget"].t == pytest.approx(600.0)
+        for entry in tab.docks.viewers.values()
+    )
+
+
+def test_the_run_button_is_visible_where_the_controls_are(scored_window):
+    # It used to sit in a footer under the panels, where it was off-screen.
+    for tab in scored_window.tabs:
+        if tab.needs_worker:
+            assert not tab.run_button.isHidden()
+
+
+def test_dragging_the_threshold_does_not_rebuild_the_layout(scored_window):
+    """The bug this replaced: every release tore the panels down and back up,
+    which lost the scroll position and looked like the window reloading."""
+    tab = next(t for t in scored_window.tabs if t.title == "EMG threshold")
+    scored_window.rail.setCurrentRow(scored_window.tabs.index(tab))
+    tab.safe_refresh()
+    before = list(tab.docks.viewers)
+
+    tab._lines.set(1, 0.31)
+
+    assert list(tab.docks.viewers) == before
+    assert scored_window.session.wake_sleep().threshold == pytest.approx(0.31)
+
+
+def test_the_threshold_shows_on_both_the_distribution_and_the_trace(scored_window):
+    tab = next(t for t in scored_window.tabs if t.title == "EMG threshold")
+    scored_window.rail.setCurrentRow(scored_window.tabs.index(tab))
+    tab.safe_refresh()
+
+    # One value, two lines -- that is the whole reason for showing both.
+    drawn = tab._lines._lines[1]
+    assert {orientation for _line, orientation in drawn} == {"v", "h"}
+
+    tab._lines.set(1, 0.27)
+    assert all(
+        float(line.value()) == pytest.approx(0.27) for line, _o in drawn
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -315,5 +315,10 @@ class MainWindow(QMainWindow):
             if answer is not QMessageBox.Yes:
                 event.ignore()
                 return
+
+        # The tabs' dock areas are child widgets, so Qt never sends them a
+        # close. Their viewers own worker threads that only stop on one.
+        for tab in self.tabs:
+            tab.shutdown()
         QApplication.processEvents()
         super().closeEvent(event)

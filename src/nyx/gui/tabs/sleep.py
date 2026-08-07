@@ -1,21 +1,24 @@
 """Tab 4 -- the components, the clustering and the names, in one place.
 
-The notebooks separate these into three STOPs, but they are one loop in
-practice: you look at the per-cluster spectra, change ``min_cluster_size``,
-look again, decide which cluster is REM, see the hypnogram, and change your
-mind. Making that three screens would mean walking between them on every turn
-of the loop.
+The notebooks separate these into three STOPs, but they are one loop: you read
+the per-cluster spectra, change ``min_cluster_size``, read them again, decide
+which cluster is REM, look at the hypnogram, and change your mind. Three
+screens would mean walking between them on every turn of that loop.
 
-They are still three different *costs*, and the two buttons say so:
+They are still three different *costs*, and the buttons say so: the PCA is
+minutes, reclustering is seconds and keeps the PCA, and naming is free -- so
+it has no button and re-runs as you edit.
 
-* the PCA is minutes -- ``Recompute the PCA``;
-* the clustering is seconds -- ``Recluster``, and it keeps the PCA;
-* naming is free -- no button at all, it re-runs as you edit, because
-  ``label_clusters`` keeps both the PCA and the clustering.
+The panels are dockable. The cluster scatter and the spectra are matplotlib,
+because they are not time series and pyqtgraph would draw them worse; the
+component scores and the hypnogram are real viewers, so they scroll against
+each other and against the traces. Drag them wherever you want them -- side by
+side is usually right for the scatter and the spectra.
 """
 
 from __future__ import annotations
 
+from ephyviewer import EpochViewer, TraceViewer
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -26,49 +29,45 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QSpinBox,
-    QSplitter,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 import nyx
-from nyx.gui.canvas import FigureView, PanelCanvas
+from nyx.gui.panels import MplPanel
 from nyx.gui.session import Stage
-from nyx.gui.tabs.base import Tab, controls_column
+from nyx.gui.sources import component_source, epoch_sources, trace_sources
+from nyx.gui.tabs.base import Tab
 from nyx.gui.widgets import ClusteringForm, PostprocessForm, StageTable
 from nyx.stages import STAGE_ROW_ORDER
 
 __all__ = ["SleepTab"]
 
-#: Above this, PC1 is carrying nearly everything and the split that follows is
+#: Above this, PC1 carries nearly everything and the split that follows is
 #: unlikely to mean much -- the notebooks say to go back to the signal.
-_VARIANCE_WARNING = 0.90
+VARIANCE_WARNING = 0.90
 
 
 class SleepTab(Tab):
     title = "Sleep stages"
     subtitle = (
-        "Read the per-cluster spectra: NREM has more delta (1-4 Hz), REM has a "
-        "theta peak around 6-9 Hz. Name the clusters in the table -- renaming "
-        "never re-clusters, so it costs nothing to change your mind."
+        "Read the per-cluster spectra: NREM has more delta (1-4 Hz), REM a "
+        "theta peak around 6-9 Hz. Name them in the table -- renaming never "
+        "re-clusters, so changing your mind is free."
     )
     stage = Stage.STEPS
     run_label = "Recompute the PCA"
+    controls_width = 360
 
-    def build(self) -> None:
-        layout = QHBoxLayout(self.body)
-        layout.setContentsMargins(0, 0, 0, 0)
+    def build_controls(self) -> list:
+        self._built_for = None
 
-        # -- components
         pca_box = QGroupBox("Components")
         pca_form = QFormLayout(pca_box)
         self.components = QSpinBox()
         self.components.setRange(2, 50)
         self.components.setValue(10)
-        self.components.setToolTip(
-            "How many components the PCA keeps. Changing this recomputes it."
-        )
+        self.components.setToolTip("Changing this recomputes the PCA.")
         pca_form.addRow("computed", self.components)
 
         self.smooth = QDoubleSpinBox()
@@ -86,13 +85,12 @@ class SleepTab(Tab):
         self.variance.setStyleSheet("color: palette(mid);")
         pca_form.addRow("", self.variance)
 
-        # -- clustering
         self.clustering = ClusteringForm()
         recluster = QPushButton("Recluster")
         recluster.setToolTip("Keeps the PCA -- only the clustering is redone.")
+        recluster.setMinimumHeight(28)
         recluster.clicked.connect(self._recluster)
 
-        # -- naming
         naming_box = QGroupBox("Names")
         naming_layout = QVBoxLayout(naming_box)
         naming_form = QFormLayout()
@@ -100,7 +98,7 @@ class SleepTab(Tab):
         self.stage_order.setPlaceholderText("REM, NREM")
         self.stage_order.setToolTip(
             "Stage names in cluster order, lowest centroid first. The table "
-            "below overrides this per cluster."
+            "overrides this per cluster."
         )
         self.stage_order.editingFinished.connect(self._rename)
         flip = QPushButton("Flip")
@@ -115,54 +113,84 @@ class SleepTab(Tab):
         naming_form.addRow("order", order_row)
         naming_layout.addLayout(naming_form)
 
-        # -- postprocessing
-        self.postprocess = PostprocessForm()
-        self.postprocess.changed.connect(self._rename)
+        self.table = StageTable()
+        self.table.changed.connect(self._rename)
+        self.table.setMinimumHeight(160)
+        naming_layout.addWidget(self.table)
 
-        self.use_postprocess = QCheckBox("apply the rules")
+        self.use_postprocess = QCheckBox("apply the postprocessing rules")
         self.use_postprocess.setToolTip(
             "Rules trade agreement for plausibility. They are off unless the "
             "params turn them on."
         )
         self.use_postprocess.toggled.connect(self._rename)
+        self.postprocess = PostprocessForm()
+        self.postprocess.changed.connect(self._rename)
 
-        layout.addWidget(
-            controls_column(
-                pca_box, self.clustering, recluster, naming_box,
-                self.use_postprocess, self.postprocess,
-            )
+        return [
+            pca_box, self.clustering, recluster, naming_box,
+            self.use_postprocess, self.postprocess,
+        ]
+
+    def build_docks(self) -> None:
+        self.clusters_panel = MplPanel(
+            "clusters and spectra",
+            placeholder="Run the PCA and clustering to see the scatter and "
+                        "the per-cluster spectra.",
+        )
+        self.features_panel = MplPanel(
+            "other dimensions",
+            placeholder="The dimensions the scatter does not show.",
+        )
+        self.pca_panel = MplPanel(
+            "component spectra", placeholder="What each component weighs."
         )
 
-        # -- figures and the table
-        splitter = QSplitter()
-        splitter.setOrientation(splitter.orientation().Vertical)
+    # -- panels ------------------------------------------------------------
 
-        self.figures = QTabWidget()
-        self.pca_view = FigureView(placeholder="Run the PCA to see the components.")
-        self.cluster_view = FigureView(
-            placeholder="Cluster the epochs to see the scatter and the spectra."
-        )
-        self.feature_view = FigureView(
-            placeholder="The dimensions the scatter does not show."
-        )
-        self.hypnogram = PanelCanvas(figsize=(9, 2.4))
+    def _build_viewers(self) -> None:
+        """Rebuild the dock area when the underlying data changes.
 
-        self.figures.addTab(self.cluster_view, "Clusters and spectra")
-        self.figures.addTab(self.pca_view, "Components")
-        self.figures.addTab(self.feature_view, "Other dimensions")
-        self.figures.addTab(self.hypnogram, "Hypnogram")
-        splitter.addWidget(self.figures)
+        Keyed on the clustering, so renaming -- which changes only the labels
+        -- swaps the hypnogram in place and leaves the scroll position alone.
+        """
+        if not self.session.has(Stage.STEPS):
+            return
+        key = (id(self.session.pca()), id(self.session.clusters()))
+        if self._built_for == key:
+            return
 
-        self.table = StageTable()
-        self.table.changed.connect(self._rename)
-        splitter.addWidget(self.table)
-        splitter.setSizes([620, 240])
+        self.docks.clear()
+        self._built_for = key
 
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(splitter)
-        layout.addWidget(right, 1)
+        eeg, _emg, offset = trace_sources(self.session.windowed())
+
+        self.docks.add(self.clusters_panel)
+        self.docks.add(self.features_panel, tabify_with="clusters and spectra")
+        self.docks.add(self.pca_panel, tabify_with="other dimensions")
+
+        components = component_source(self.session.pca(), n=4, t_offset=offset)
+        if components is not None:
+            self.docks.add(TraceViewer(source=components, name="components"),
+                           location="bottom")
+        self.docks.add(TraceViewer(source=eeg, name="EEG"), location="bottom")
+        self._add_hypnogram(offset)
+
+    def _add_hypnogram(self, offset: float) -> None:
+        named = [("nyx", self.session.staging().hypnogram)]
+        if self.session.reference is not None:
+            from nyx.metrics import normalise_labels
+
+            named.append(("reference", normalise_labels(self.session.reference)))
+
+        source = epoch_sources(named, offset)
+        panel = self.docks.panel("hypnogram")
+        if panel is not None:
+            panel.source = source
+            panel.refresh()
+        else:
+            self.docks.add(EpochViewer(source=source, name="hypnogram"),
+                           location="bottom")
 
     # -- actions -----------------------------------------------------------
 
@@ -188,7 +216,10 @@ class SleepTab(Tab):
             self.postprocess.rules() if self.use_postprocess.isChecked() else []
         )
         self.session.compute(Stage.STEPS)
-        self._draw_hypnogram()
+
+        _eeg, _emg, offset = trace_sources(self.session.windowed())
+        self._add_hypnogram(offset)
+        self._redraw_figures()
         self._fill_table()
 
     # -- session -----------------------------------------------------------
@@ -217,9 +248,10 @@ class SleepTab(Tab):
                      **step.clustering_params()}
                 )
             if not self.stage_order.text().strip():
-                order = step.stage_order or ["REM", "NREM"]
                 with self.quiet(self.stage_order):
-                    self.stage_order.setText(", ".join(order))
+                    self.stage_order.setText(
+                        ", ".join(step.stage_order or ["REM", "NREM"])
+                    )
 
         rules = self.session.postprocess_rules()
         with self.quiet(self.use_postprocess):
@@ -229,8 +261,8 @@ class SleepTab(Tab):
         if not self.session.has(Stage.STEPS):
             return
 
+        self._build_viewers()
         self._redraw_figures()
-        self._draw_hypnogram()
         self._fill_table()
 
     # -- drawing -----------------------------------------------------------
@@ -243,31 +275,27 @@ class SleepTab(Tab):
         stages = self.session.cluster_to_stage()
         smooth = float(self.smooth.value())
 
-        self.pca_view.set_figure(nyx.plot_pca_grid(pca, smooth=smooth))
-        self.cluster_view.set_figure(
-            nyx.plot_cluster_check(pca, clusters=clusters, stages=stages, smooth=smooth)
+        self.clusters_panel.set_figure(
+            nyx.plot_cluster_check(pca, clusters=clusters, stages=stages,
+                                   smooth=smooth)
         )
-        self.feature_view.set_figure(
+        self.features_panel.set_figure(
             nyx.plot_cluster_features(clusters, stages=stages)
         )
+        self.pca_panel.set_figure(nyx.plot_pca_grid(pca, smooth=smooth))
 
         explained = pca.explained_variance_ratio
         first = float(explained[0]) if len(explained) else 0.0
-        text = "  ".join(f"PC{i + 1} {100 * v:.0f}%" for i, v in enumerate(explained[:4]))
-        if first > _VARIANCE_WARNING:
+        text = "  ".join(
+            f"PC{i + 1} {100 * v:.0f}%" for i, v in enumerate(explained[:4])
+        )
+        if first > VARIANCE_WARNING:
             text += (
                 f"\n\nPC1 carries {100 * first:.0f}% of the variance. That "
                 f"usually means the spectrogram is dominated by something "
                 f"other than sleep -- go back and check the signal."
             )
         self.variance.setText(text)
-
-    def _draw_hypnogram(self) -> None:
-        try:
-            staging = self.session.staging()
-        except Exception:  # noqa: BLE001
-            return
-        self.hypnogram.draw_panel(nyx.plot_hypnogram_result, staging)
 
     def _fill_table(self) -> None:
         try:
@@ -279,11 +307,10 @@ class SleepTab(Tab):
 
 
 def _split(text: str) -> list[str]:
-    return [part.strip() for part in str(text).replace(",", " ").split() if part.strip()]
+    return [p.strip() for p in str(text).replace(",", " ").split() if p.strip()]
 
 
 def _stage_choices(session) -> list[str]:
-    """Stage names to offer, the vocabulary first and anything else after."""
     names = list(STAGE_ROW_ORDER)
     for step in session.steps:
         for name in step.stage_order or []:

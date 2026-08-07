@@ -21,9 +21,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPlainTextEdit,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -35,9 +33,9 @@ from nyx.gui.filters import (
     recording_filters,
     recording_formats,
 )
+from nyx.gui.panels import TextPanel
 from nyx.gui.session import Stage
-from nyx.gui.tabs.base import Tab, controls_column
-from nyx.gui.widgets import monospace
+from nyx.gui.tabs.base import Tab
 
 __all__ = ["LoadTab"]
 
@@ -48,16 +46,13 @@ class LoadTab(Tab):
     title = "Recording"
     subtitle = (
         "Pick the file, the two channels and a parameter preset. Check the "
-        "summary on the right before moving on: EEG and EMG the wrong way "
+        "summary panel before moving on: EEG and EMG the wrong way "
         "round gives a scoring that looks plausible and is wrong."
     )
     stage = Stage.LOAD
     run_label = "Load"
 
-    def build(self) -> None:
-        layout = QHBoxLayout(self.body)
-        layout.setContentsMargins(0, 0, 0, 0)
-
+    def build_controls(self) -> list:
         # -- recording
         recording_box = QGroupBox("Recording")
         form = QFormLayout(recording_box)
@@ -136,22 +131,6 @@ class LoadTab(Tab):
         )
         demo.clicked.connect(self._load_demo)
 
-        layout.addWidget(
-            controls_column(recording_box, params_box, reference_box, demo)
-        )
-
-        # -- summary
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(QLabel("<b>What was loaded</b>"))
-        self.summary = QPlainTextEdit()
-        self.summary.setReadOnly(True)
-        self.summary.setFont(monospace())
-        self.summary.setPlaceholderText("Nothing loaded yet.")
-        right_layout.addWidget(self.summary, 1)
-        layout.addWidget(right, 1)
-
         self.path.editingFinished.connect(self._offer_channels)
         self.format.currentTextChanged.connect(self._offer_channels)
 
@@ -162,6 +141,14 @@ class LoadTab(Tab):
             self._describe_params()
         else:
             self._load_params(self.preset.currentText())
+
+        return [recording_box, params_box, reference_box, demo]
+
+    def build_docks(self) -> None:
+        self.summary = TextPanel(
+            "what was loaded", placeholder="Nothing loaded yet."
+        )
+        self.docks.add(self.summary)
 
     # -- browsing ----------------------------------------------------------
 
@@ -297,7 +284,7 @@ class LoadTab(Tab):
         try:
             recording = self.session.recording
         except Exception:  # noqa: BLE001 - nothing loaded yet is normal here
-            self.summary.setPlainText("")
+            self.summary.set_text("")
             return
 
         lines = [recording.describe(), ""]
@@ -312,7 +299,7 @@ class LoadTab(Tab):
             )
         else:
             lines.append("reference: none -- scoring will not be scored against anything")
-        self.summary.setPlainText("\n".join(lines))
+        self.summary.set_text("\n".join(lines))
 
 
 def _row(*widgets) -> QWidget:

@@ -1,12 +1,17 @@
 """Tab 2 -- mains interference, and where to start and stop.
 
-The notebooks' second STOP. Two decisions, both cheap to get right here and
-expensive to discover later:
+The notebooks' second STOP, and the first place a scrollable view earns its
+keep: deciding where a recording really starts is a matter of *looking* at the
+first few minutes, not at a thumbnail of twelve hours. The traces and their
+time-frequency views are ephyviewer's, locked to one clock, so scrolling one
+scrolls them all.
 
-*The notch.* ``check_signals`` measures how much power sits at 50 and 60 Hz and
-suggests one. It matters most for the EMG, whose band is 30-100 Hz -- mains hum
-lands squarely inside it and inflates the power that separates wake from sleep.
-The EEG band usually stops below it. That asymmetry is why the two channels get
+Two decisions, both cheap now and expensive to discover later:
+
+*The notch.* ``check_signals`` measures the power at 50 and 60 Hz and suggests
+one. It matters most for the EMG, whose band is 30-100 Hz: mains hum lands
+inside it and inflates the very power that separates wake from sleep. The EEG
+band usually stops below it. That asymmetry is why the two channels have
 separate checkboxes rather than one.
 
 *The window.* Recordings often start before the animal is connected and end
@@ -16,6 +21,7 @@ for everything in between.
 
 from __future__ import annotations
 
+from ephyviewer import SpectrogramViewer, TraceViewer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -23,18 +29,16 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
-    QPlainTextEdit,
     QPushButton,
-    QSplitter,
-    QVBoxLayout,
     QWidget,
 )
 
 import nyx
-from nyx.gui.canvas import FigureView
+from nyx.gui.panels import MplPanel, TextPanel
 from nyx.gui.session import Stage
-from nyx.gui.tabs.base import Tab, controls_column
-from nyx.gui.widgets import monospace
+from nyx.gui.sources import trace_sources
+from nyx.gui.tabs.base import Tab
+from nyx.gui.viewers import NyxTimeFreqViewer, timefreq_params_from
 
 __all__ = ["SignalTab"]
 
@@ -42,21 +46,18 @@ __all__ = ["SignalTab"]
 class SignalTab(Tab):
     title = "Signal check"
     subtitle = (
-        "Look at the raw signal before scoring it. Decide the notch and the "
+        "Scroll the traces before scoring them. Decide the notch and the "
         "analysis window here -- both are cheap to fix now and expensive to "
         "discover afterwards."
     )
     stage = Stage.PREPROCESS
-    run_label = "Check the signal"
+    run_label = "Apply and preprocess"
 
-    def build(self) -> None:
+    def build_controls(self) -> list:
         self._check = None
 
-        layout = QHBoxLayout(self.body)
-        layout.setContentsMargins(0, 0, 0, 0)
-
         # -- checking
-        check_box = QGroupBox("Check")
+        check_box = QGroupBox("Measure the signal")
         check_form = QFormLayout(check_box)
         self.preview = QDoubleSpinBox()
         self.preview.setRange(0.0, 1e7)
@@ -64,15 +65,18 @@ class SignalTab(Tab):
         self.preview.setValue(10000.0)
         self.preview.setSuffix(" s")
         self.preview.setToolTip(
-            "How much signal to look at. 0 uses all of it, which on a long "
+            "How much signal to measure. 0 uses all of it, which on a long "
             "recording is slow."
         )
         check_form.addRow("preview", self.preview)
 
-        run_check = QPushButton("Run the check")
-        run_check.clicked.connect(lambda: self.run_requested.emit(Stage.LOAD))
-        run_check.clicked.connect(self._run_check)
-        check_form.addRow("", run_check)
+        measure = QPushButton("Measure")
+        measure.setToolTip(
+            "Reports the sampling rate, flat or saturated stretches, and how "
+            "much power sits at 50 and 60 Hz."
+        )
+        measure.clicked.connect(self._measure)
+        check_form.addRow("", measure)
 
         # -- notch
         notch_box = QGroupBox("Mains notch")
@@ -125,74 +129,117 @@ class SignalTab(Tab):
         window_form.addRow("start", self.start)
         window_form.addRow("end", self.end)
 
-        layout.addWidget(controls_column(check_box, notch_box, window_box))
-
-        # -- figure and summary
-        splitter = QSplitter()
-        splitter.setOrientation(splitter.orientation().Vertical)
-
-        self.figure = FigureView(
-            placeholder="Run the check to see the traces and their spectra."
+        here = QPushButton("Use the view as the window")
+        here.setToolTip(
+            "Take the start and end from what the traces are currently showing."
         )
-        splitter.addWidget(self.figure)
+        here.clicked.connect(self._window_from_view)
+        window_form.addRow("", here)
 
-        self.summary = QPlainTextEdit()
-        self.summary.setReadOnly(True)
-        self.summary.setFont(monospace())
-        self.summary.setPlaceholderText(
-            "The check reports the sampling rate, the amount of flat or "
-            "saturated signal, and how much power sits at 50 and 60 Hz."
+        return [check_box, notch_box, window_box]
+
+    def build_docks(self) -> None:
+        self.summary = TextPanel(
+            "measurements",
+            placeholder="Press Measure to see the sampling rate, artefacts "
+                        "and mains power.",
         )
-        self.summary.setMaximumHeight(220)
-        splitter.addWidget(self.summary)
-        splitter.setSizes([600, 200])
+        self.spectra = MplPanel(
+            "spectra", placeholder="Press Measure to see the power spectra."
+        )
+        self._built_for = None
 
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(splitter)
-        layout.addWidget(right, 1)
+    # -- panels ------------------------------------------------------------
 
-    # -- checking ----------------------------------------------------------
+    def _build_viewers(self) -> None:
+        """Put the recording's traces in the dock area, once per recording."""
+        recording = self.session.recording
+        if self._built_for is recording:
+            return
 
-    def _run_check(self) -> None:
-        """Runs on this thread: the check is bounded by ``preview``.
+        self.docks.clear()
+        eeg, emg, _offset = trace_sources(recording)
 
-        Deliberately not a job. It reads at most ``preview`` seconds, and
-        keeping it here means the figure is built on the thread that owns it.
+        self.docks.add(TraceViewer(source=eeg, name="EEG"))
+        self.docks.add(
+            self._timefreq(eeg, "EEG spectrum", "EEG"), tabify_with="EEG"
+        )
+        if emg is not None:
+            self.docks.add(TraceViewer(source=emg, name="EMG"))
+            self.docks.add(
+                self._timefreq(emg, "EMG spectrum", "EMG"), tabify_with="EMG"
+            )
+
+        self.docks.add(self.summary, location="right")
+        self.docks.add(self.spectra, tabify_with="measurements")
+        self._built_for = recording
+
+    def _timefreq(self, source, name: str, channel: str):
+        """The spectrogram, matched to what the scoring will compute.
+
+        The fast Fourier view by default -- this tab is for scrolling a whole
+        recording, and a wavelet transform per redraw is not what that wants.
         """
+        params = self.session.params
+        if params.get("features", {}).get("method") == "scalogram":
+            viewer = NyxTimeFreqViewer(source=source, name=name)
+            viewer.apply_settings(timefreq_params_from(params, channel))
+            return viewer
+
+        viewer = SpectrogramViewer(source=source, name=name)
+        section = params.get(channel, {}) or {}
+        for key, value in (("f_start", section.get("min_freq")),
+                           ("f_stop", section.get("max_freq"))):
+            if value is None:
+                continue
+            try:
+                viewer.params.param("spectrogram").param(key).setValue(float(value))
+            except Exception:  # noqa: BLE001 - naming varies between releases
+                pass
+        return viewer
+
+    # -- measuring ---------------------------------------------------------
+
+    def _measure(self) -> None:
+        """Bounded by ``preview``, so it runs here rather than on a worker."""
         try:
             recording = self.session.recording
         except Exception as exc:  # noqa: BLE001
             self.status.emit(f"Load a recording first: {exc}")
             return
 
-        preview = self.preview.value() or None
-        self.status.emit("Checking the signal...")
-        self._check = nyx.check_signals(recording, preview=preview)
-
-        self.figure.set_figure(self._check.plot())
-        self.summary.setPlainText(self._check.summary())
+        self.status.emit("Measuring...")
+        self._check = nyx.check_signals(recording, preview=self.preview.value() or None)
+        self.summary.set_text(self._check.summary())
+        self.spectra.set_figure(self._check.plot())
 
         suggested = self._check.suggested_notch()
         with self.quiet(self.notch):
             self.notch.setCurrentText("none" if not suggested else str(int(suggested)))
-        if suggested:
-            self.status.emit(
-                f"Mains interference at {int(suggested)} Hz -- worth notching, "
-                f"the EMG band especially."
-            )
-        else:
-            self.status.emit("No obvious mains interference.")
-
-        self.end.setMaximum(float(recording.duration))
-        if self.end.value() == 0.0:
-            with self.quiet(self.end):
-                self.end.setValue(float(recording.duration))
+        self.status.emit(
+            f"Mains interference at {int(suggested)} Hz -- worth notching, the "
+            f"EMG band especially." if suggested
+            else "No obvious mains interference."
+        )
 
     def _toggle_window(self, whole: bool) -> None:
         self.start.setEnabled(not whole)
         self.end.setEnabled(not whole)
+
+    def _window_from_view(self) -> None:
+        """Read the window off whatever the traces are showing."""
+        toolbar = self.docks.navigation_toolbar
+        centre = float(toolbar.t)
+        width = float(getattr(toolbar, "xsize", 0.0) or 0.0)
+        if width <= 0:
+            self.status.emit("Scroll the traces to the stretch you want first.")
+            return
+        self.whole.setChecked(False)
+        self.start.setValue(max(0.0, centre - width / 2))
+        self.end.setValue(centre + width / 2)
+        self.status.emit(
+            f"Window set to {self.start.value():.0f}-{self.end.value():.0f} s."
+        )
 
     # -- session -----------------------------------------------------------
 
@@ -202,10 +249,8 @@ class SignalTab(Tab):
         harmonics = int(self.harmonics.value())
 
         params = dict(self.session.params)
-        for section, wanted in (
-            ("EEG", self.notch_eeg.isChecked()),
-            ("EMG", self.notch_emg.isChecked()),
-        ):
+        for section, wanted in (("EEG", self.notch_eeg.isChecked()),
+                                ("EMG", self.notch_emg.isChecked())):
             settings = dict(params.get(section, {}))
             settings["notch"] = frequency if wanted else None
             if frequency is not None and wanted:
@@ -220,6 +265,8 @@ class SignalTab(Tab):
 
     def refresh(self) -> None:
         recording = self.session.recording
+        self._build_viewers()
+
         self.end.setMaximum(float(recording.duration))
         if self.end.value() == 0.0:
             with self.quiet(self.end):

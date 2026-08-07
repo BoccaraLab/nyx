@@ -1,42 +1,41 @@
-"""Tab 5 -- the finished scoring, and writing it out.
+"""Tab 5 -- the finished scoring, checked and written out.
 
-The overview knobs are exposed rather than fixed. ``plot_scoring_overview``
-takes ``eeg_range``, ``emg_range``, ``eeg_fmax``, ``emg_fmax`` and ``palette``
-precisely because no single colour scale suits every recording, and a
-spectrogram you cannot read tells you nothing.
+This is where a GUI earns its existence. A notebook can print an agreement
+table; what it cannot do is let you scroll to the twelve minutes where nyx and
+the reference disagree and see *why*. So the scoring, the reference, the traces
+and the spectrogram are all here, on one clock, and the hypnogram is editable
+in place -- ``alt``+arrows for the next change of stage, ``ctrl``+arrows for
+the next epoch a postprocessing rule objects to.
 
-The figures are built here, on the main thread, from data a worker already
-fetched. ``plot_scoring_overview`` reads the whole window's traces off disk,
-which is the slow part -- but it also goes through pyplot, which is not thread
-safe, so the read is what moves and the drawing stays.
+What you edit is what gets saved: the corrected hypnogram goes back into the
+session, agreement is recomputed against it, and ``run.json`` records that a
+human changed it.
 """
 
 from __future__ import annotations
 
 import os
 
+from ephyviewer import EpochViewer, SpectrogramViewer, TraceViewer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPlainTextEdit,
     QPushButton,
-    QTabWidget,
-    QVBoxLayout,
     QWidget,
 )
 
 import nyx
-from nyx.gui.canvas import FigureView, PanelCanvas
+from nyx.gui.panels import MplPanel, TextPanel
 from nyx.gui.session import Stage
-from nyx.gui.tabs.base import Tab, controls_column
-from nyx.gui.widgets import monospace
+from nyx.gui.sources import epoch_source, trace_sources
+from nyx.gui.tabs.base import Tab
+from nyx.gui.viewers import NyxTimeFreqViewer, timefreq_params_from
 
 __all__ = ["ResultTab"]
 
@@ -44,63 +43,46 @@ __all__ = ["ResultTab"]
 class ResultTab(Tab):
     title = "Result"
     subtitle = (
-        "The scoring in context. Adjust the colour scales until the "
-        "spectrograms are readable, then write everything out."
+        "Scroll to where nyx and the reference disagree, and fix it. "
+        "Alt+arrows jump to the next change of stage, Ctrl+arrows to the next "
+        "epoch a rule objects to."
     )
     stage = Stage.RESULT
     needs_worker = False
 
-    def build(self) -> None:
-        layout = QHBoxLayout(self.body)
-        layout.setContentsMargins(0, 0, 0, 0)
+    def build_controls(self) -> list:
+        self._built_for = None
 
-        # -- display
-        display_box = QGroupBox("Display")
-        display_form = QFormLayout(display_box)
-
-        self.eeg_low, self.eeg_high = _range_row(display_form, "EEG colour")
-        self.emg_low, self.emg_high = _range_row(display_form, "EMG colour")
-
-        self.eeg_fmax = QDoubleSpinBox()
-        self.eeg_fmax.setRange(0.0, 1000.0)
-        self.eeg_fmax.setSuffix(" Hz")
-        self.eeg_fmax.setToolTip("0 uses the params' upper frequency.")
-        display_form.addRow("EEG f max", self.eeg_fmax)
-
-        self.emg_fmax = QDoubleSpinBox()
-        self.emg_fmax.setRange(0.0, 1000.0)
-        self.emg_fmax.setSuffix(" Hz")
-        display_form.addRow("EMG f max", self.emg_fmax)
+        view_box = QGroupBox("Spectrogram")
+        view_form = QFormLayout(view_box)
+        self.scalogram = QCheckBox("wavelet (slower, easier to read)")
+        self.scalogram.setToolTip(
+            "A Morlet scalogram in dB, as the scalogram feature backend "
+            "computes it. Prettier and much slower than the Fourier view."
+        )
+        self.scalogram.toggled.connect(self._rebuild)
+        view_form.addRow("", self.scalogram)
 
         self.palette = QComboBox()
         self.palette.addItems(
-            ["jet", "viridis", "magma", "inferno", "turbo", "RdYlBu_r"]
+            ["jet", "viridis", "magma", "inferno", "turbo", "gray"]
         )
-        display_form.addRow("palette", self.palette)
+        self.palette.currentTextChanged.connect(self._set_palette)
+        view_form.addRow("colours", self.palette)
 
-        redraw = QPushButton("Redraw")
-        redraw.clicked.connect(self._draw_overview)
-        display_form.addRow("", redraw)
-
-        # -- review
-        review_box = QGroupBox("Check it by hand")
-        review_layout = QVBoxLayout(review_box)
-        note = QLabel(
-            "Scroll the traces and the spectrogram, and correct the "
-            "hypnogram epoch by epoch. Anything you change here is what gets "
-            "saved."
-        )
-        note.setWordWrap(True)
-        review_layout.addWidget(note)
-        self.review_button = QPushButton("Review and edit...")
-        self.review_button.clicked.connect(self._open_review)
-        review_layout.addWidget(self.review_button)
-        self.edited_note = QLabel()
+        edit_box = QGroupBox("Editing")
+        edit_layout = QFormLayout(edit_box)
+        self.edited_note = QLabel("Not edited.")
         self.edited_note.setWordWrap(True)
-        self.edited_note.setStyleSheet("color: #e37400;")
-        review_layout.addWidget(self.edited_note)
+        edit_layout.addRow("", self.edited_note)
+        keep = QPushButton("Keep my edits")
+        keep.setToolTip(
+            "Take the hypnogram as it is now. Also what Ctrl+S in the "
+            "hypnogram panel does."
+        )
+        keep.clicked.connect(self._keep_edits)
+        edit_layout.addRow("", keep)
 
-        # -- saving
         save_box = QGroupBox("Save")
         save_form = QFormLayout(save_box)
         self.output = QLineEdit()
@@ -117,7 +99,7 @@ class ResultTab(Tab):
         self.granularities = QLineEdit()
         self.granularities.setPlaceholderText("5, 4, 3")
         self.granularities.setToolTip(
-            "Extra hypnograms at coarser stage counts. Leave blank for none."
+            "Extra hypnograms at coarser stage counts. Blank for none."
         )
         save_form.addRow("granularities", self.granularities)
 
@@ -133,31 +115,109 @@ class ResultTab(Tab):
         save_form.addRow("", self.save_emg)
 
         save = QPushButton("Save")
+        save.setMinimumHeight(30)
         save.clicked.connect(self._save)
         save_form.addRow("", save)
 
-        layout.addWidget(controls_column(display_box, review_box, save_box))
+        return [view_box, edit_box, save_box]
 
-        # -- figures
-        self.figures = QTabWidget()
-        self.overview = FigureView(placeholder="Score a recording to see it here.")
-        self.summary_view = FigureView(placeholder="The nine-panel summary.")
-        self.confusion = PanelCanvas(figsize=(5, 4.5))
-        self.agreement = QPlainTextEdit()
-        self.agreement.setReadOnly(True)
-        self.agreement.setFont(monospace())
-        self.agreement.setPlaceholderText(
-            "No manual scoring was loaded, so there is nothing to compare "
-            "against. That is a normal way to run nyx."
+    def build_docks(self) -> None:
+        self.agreement = TextPanel(
+            "agreement",
+            placeholder="No manual scoring was loaded, so there is nothing to "
+                        "compare against. That is a normal way to run nyx.",
         )
+        self.confusion = MplPanel("confusion", placeholder="Needs a reference.")
+        self.summary = MplPanel("summary", placeholder="The nine-panel summary.")
 
-        self.figures.addTab(self.overview, "Overview")
-        self.figures.addTab(self.summary_view, "Summary")
-        self.figures.addTab(self.confusion, "Confusion")
-        self.figures.addTab(self.agreement, "Agreement")
-        layout.addWidget(self.figures, 1)
+    # -- panels ------------------------------------------------------------
 
-    # -- actions -----------------------------------------------------------
+    def _rebuild(self) -> None:
+        self._built_for = None
+        self.safe_refresh()
+
+    def _build_viewers(self) -> None:
+        if not self.session.has(Stage.STEPS):
+            return
+        key = (id(self.session.clusters()), self.scalogram.isChecked())
+        if self._built_for == key:
+            return
+
+        from nyx.gui.review import NyxEpochSource
+        from nyx.gui.viewers import NyxEpochEncoder
+
+        self.docks.clear()
+        self._built_for = key
+
+        result = self.session.result()
+        eeg, emg, offset = trace_sources(result.recording)
+        params = self.session.params
+
+        if emg is not None:
+            self.docks.add(TraceViewer(source=emg, name="EMG"))
+        self.docks.add(TraceViewer(source=eeg, name="EEG"))
+        self.docks.add(self._timefreq(eeg, "EEG spectrum", "EEG", params))
+
+        if result.reference is not None:
+            from nyx.metrics import normalise_labels
+
+            self.docks.add(EpochViewer(
+                source=epoch_source(
+                    normalise_labels(result.reference), "reference", offset
+                ),
+                name="reference",
+            ))
+
+        self.epoch_source = NyxEpochSource(
+            result.hypnogram, name="nyx", t_offset=offset,
+            on_save=self._apply_edit,
+        )
+        self.encoder = NyxEpochEncoder(
+            source=self.epoch_source, name="hypnogram",
+            rules=self.session.postprocess_rules(),
+        )
+        self.docks.add(self.encoder)
+
+        self.docks.add(self.agreement, location="right")
+        self.docks.add(self.confusion, tabify_with="agreement")
+        self.docks.add(self.summary, tabify_with="confusion")
+
+    def _timefreq(self, source, name: str, channel: str, params: dict):
+        if self.scalogram.isChecked():
+            viewer = NyxTimeFreqViewer(source=source, name=name)
+            viewer.apply_settings(timefreq_params_from(params, channel))
+        else:
+            viewer = SpectrogramViewer(source=source, name=name)
+        try:
+            viewer.params["colormap"] = self.palette.currentText()
+        except Exception:  # noqa: BLE001
+            pass
+        return viewer
+
+    def _set_palette(self, name: str) -> None:
+        for entry in self.docks.viewers.values():
+            widget = entry["widget"]
+            if hasattr(widget, "params") and hasattr(widget, "change_color_scale"):
+                try:
+                    widget.params["colormap"] = name
+                except Exception:  # noqa: BLE001
+                    continue
+
+    # -- editing -----------------------------------------------------------
+
+    def _apply_edit(self, hypnogram) -> None:
+        self.session.set_hypnogram(hypnogram, source="manual")
+        self.status.emit("Edit kept. It is what will be saved.")
+        self._update_readouts()
+
+    def _keep_edits(self) -> None:
+        source = getattr(self, "epoch_source", None)
+        if source is None:
+            self.status.emit("Nothing to keep yet.")
+            return
+        source.save()
+
+    # -- saving ------------------------------------------------------------
 
     def _browse(self) -> None:
         path = QFileDialog.getExistingDirectory(
@@ -166,20 +226,6 @@ class ResultTab(Tab):
         if path:
             self.output.setText(path)
 
-    def _open_review(self) -> None:
-        try:
-            from nyx.gui.review import open_review_window
-        except ImportError as exc:
-            self.status.emit(
-                f"The review window needs ephyviewer: pip install "
-                f'"nyx-sleep[gui]"  ({exc})'
-            )
-            return
-        try:
-            self._review = open_review_window(self.session, parent=self)
-        except Exception as exc:  # noqa: BLE001
-            self.status.emit(f"Could not open the review window: {exc}")
-
     def _save(self) -> None:
         output = self.output.text().strip()
         if not output:
@@ -187,7 +233,7 @@ class ResultTab(Tab):
             return
 
         granularities = [
-            int(part) for part in self.granularities.text().replace(",", " ").split()
+            int(p) for p in self.granularities.text().replace(",", " ").split()
         ] or None
 
         try:
@@ -205,29 +251,25 @@ class ResultTab(Tab):
         for name in sorted(os.listdir(written)):
             self.status.emit(f"  {name}")
 
-    # -- drawing -----------------------------------------------------------
+    # -- readouts ----------------------------------------------------------
 
-    def _overview_kwargs(self) -> dict:
-        def span(low, high):
-            return None if low.value() == high.value() else (low.value(), high.value())
-
-        return {
-            "eeg_range": span(self.eeg_low, self.eeg_high),
-            "emg_range": span(self.emg_low, self.emg_high),
-            "eeg_fmax": self.eeg_fmax.value() or None,
-            "emg_fmax": self.emg_fmax.value() or None,
-            "palette": self.palette.currentText(),
-        }
-
-    def _draw_overview(self) -> None:
-        if not self.session.has(Stage.STEPS):
-            return
+    def _update_readouts(self) -> None:
         result = self.session.result()
-        self.status.emit("Drawing the overview...")
-        self.overview.set_figure(
-            nyx.plot_scoring_overview(result, **self._overview_kwargs())
+
+        self.edited_note.setText(
+            "Edited by hand. That is what will be saved, and run.json records it."
+            if self.session.was_edited() else "Not edited."
         )
-        self.status.emit("Drawn.")
+        self.edited_note.setStyleSheet(
+            "color: #e37400;" if self.session.was_edited() else "color: palette(mid);"
+        )
+
+        if result.agreement is not None:
+            self.agreement.set_text(result.agreement.summary())
+            self.confusion.set_figure(_confusion_figure(result))
+        else:
+            self.agreement.set_text("")
+        self.summary.set_figure(nyx.plot_summary(result))
 
     def refresh(self) -> None:
         if not self.session.has(Stage.STEPS):
@@ -237,42 +279,14 @@ class ResultTab(Tab):
             name = self.session.recording.name or "recording"
             self.output.setText(os.path.join("results", name))
 
-        self.edited_note.setText(
-            "This hypnogram has been edited by hand. The edit is what will be "
-            "saved, and it is recorded in run.json."
-            if self.session.was_edited() else ""
-        )
-
-        result = self.session.result()
-        self.overview.set_figure(
-            nyx.plot_scoring_overview(result, **self._overview_kwargs())
-        )
-        self.summary_view.set_figure(nyx.plot_summary(result))
-
-        if result.agreement is not None:
-            self.confusion.draw_panel(nyx.report.plot_confusion, result)
-            self.agreement.setPlainText(result.agreement.summary())
-        else:
-            self.confusion.clear()
-            self.agreement.setPlainText("")
+        self._build_viewers()
+        self._update_readouts()
 
 
-def _range_row(form: QFormLayout, label: str):
-    """A low/high pair on one row. Equal values mean "let the plot decide"."""
-    first, second = QDoubleSpinBox(), QDoubleSpinBox()
-    for spin in (first, second):
-        spin.setRange(-1e6, 1e6)
-        spin.setDecimals(2)
-        spin.setSingleStep(0.1)
-        spin.setValue(0.0)
-        spin.setToolTip(
-            "Leave both at the same value to let the plot choose its own scale."
-        )
-    row = QWidget()
-    layout = QHBoxLayout(row)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.addWidget(first)
-    layout.addWidget(QLabel("to"))
-    layout.addWidget(second)
-    form.addRow(label, row)
-    return first, second
+def _confusion_figure(result):
+    """``plot_confusion`` lays out its own colorbar, so give it its own figure."""
+    import matplotlib.pyplot as plt
+
+    figure, ax = plt.subplots(figsize=(5.5, 4.5), layout="constrained")
+    nyx.report.plot_confusion(result, ax)
+    return figure
