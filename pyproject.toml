@@ -83,6 +83,9 @@ dev-gui = [
 # Not gui-scripts: nyx prints as it runs, and on Windows gui-scripts detaches
 # the console, so a failure would leave nothing to read.
 nyx-gui = "nyx.gui:main"
+# ephyviewer's standalone viewer. Its own `ephyviewer` command is broken in
+# 1.8.0 (missing __version__); see nyx/gui/standalone.py.
+nyx-ephyviewer = "nyx.gui.standalone:main"
 
 [project.urls]
 Homepage = "https://github.com/BoccaraLab/nyx"
