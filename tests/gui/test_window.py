@@ -349,6 +349,27 @@ def test_a_spectrogram_for_the_old_band_is_not_drawn(scored_window):
     assert viewer.last_Sxx[0] is None
 
 
+@pytest.mark.parametrize("wavelet", [False, True])
+def test_a_result_that_lands_after_close_is_ignored(scored_window, wavelet):
+    """A transform still running at close posts its result anyway.
+
+    Drawn into a viewer being torn down, that segfaulted the CI run -- a
+    slow runner is what lets the transform outlast the close.
+    """
+    import numpy as np
+
+    tab = tab_named(scored_window, "Signal check")
+    tab.scalogram.setChecked(wavelet)
+    viewer = tab.docks.panel("EEG spectrum")
+    stored = viewer.last_wt_maps if wavelet else viewer.last_Sxx
+    stored[0] = None
+
+    viewer.close()
+    viewer.on_data_ready(0, viewer.t, 0.0, 10.0, 0.0, 10.0, np.zeros((5, 10)))
+
+    assert stored[0] is None
+
+
 def test_the_fourier_band_is_in_the_double_click_settings(scored_window):
     tab = tab_named(scored_window, "Signal check")
     viewer = tab.docks.panel("EEG spectrum")

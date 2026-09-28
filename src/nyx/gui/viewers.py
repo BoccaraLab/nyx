@@ -140,6 +140,24 @@ def _apply_batched(viewer, group, settings: dict) -> None:
     viewer.refresh()
 
 
+def _close_workers(viewer) -> None:
+    """Cut a closing viewer off from its workers before stopping them.
+
+    Upstream's closeEvent quits each thread and waits for it -- but a
+    transform already running finishes first and posts its result, which is
+    then delivered while the viewer is being torn down: drawing into images
+    whose C++ side is going away. That is a segfault, not an exception, and a
+    slow CI runner lost the race. So the viewer is marked closed (its
+    ``on_data_ready`` checks) and disconnected first.
+    """
+    viewer._closed = True
+    for worker in getattr(viewer, "timefreq_makers", []):
+        try:
+            worker.data_ready.disconnect(viewer.on_data_ready)
+        except (RuntimeError, TypeError):
+            pass  # never connected, or already gone
+
+
 def _emit(signal, *args) -> None:
     """Emit, unless the viewer on the other end has already been destroyed.
 
@@ -392,7 +410,13 @@ class NyxTimeFreqViewer(TimeFreqViewer):
         else:
             d["filter_sos"] = None
 
+    def closeEvent(self, event):  # noqa: N802 - Qt's spelling
+        _close_workers(self)
+        super().closeEvent(event)
+
     def on_data_ready(self, chan, t, t_start, t_stop, t1, t2, wt_map):
+        if getattr(self, "_closed", False):
+            return  # a result that finished after close; see _close_workers
         if not self.params_controller.visible_channels[chan]:
             return
         if self.images[chan] is None:
@@ -880,6 +904,10 @@ class NyxSpectrogramViewer(SpectrogramViewer):
         finally:
             group.blockSignals(blocked)
 
+    def closeEvent(self, event):  # noqa: N802 - Qt's spelling
+        _close_workers(self)
+        super().closeEvent(event)
+
     def apply_settings(self, settings: dict) -> None:
         """Set spectrogram parameters from :func:`spectrogram_params_from`."""
         # Upstream calls the group "scalogram" even in the Fourier viewer.
@@ -892,6 +920,8 @@ class NyxSpectrogramViewer(SpectrogramViewer):
         worker now sends only ``[f_start, f_stop]``, so the image is put
         there, and the axis shows just that range.
         """
+        if getattr(self, "_closed", False):
+            return  # a result that finished after close; see _close_workers
         first, last, df = _frequency_rows(
             self.source.sample_rate, float(self.params["scalogram", "binsize"]),
             float(self.params["scalogram", "f_start"]),
