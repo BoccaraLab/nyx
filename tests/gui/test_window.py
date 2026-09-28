@@ -292,6 +292,52 @@ def test_the_spectrogram_uses_the_epoch_length_from_the_params(scored_window):
     )
 
 
+def test_the_fourier_view_shows_the_band_the_scoring_uses(qtbot, scored_window):
+    """It ran 0 Hz to Nyquist whatever the params said, and ignored the
+    max frequency box; only the wavelet view honoured it."""
+    tab = tab_named(scored_window, "Signal check")
+    eeg = scored_window.session.params["EEG"]
+
+    viewer = tab.docks.panel("EEG spectrum")
+    assert viewer.params["scalogram", "f_start"] == pytest.approx(eeg["min_freq"])
+    assert viewer.params["scalogram", "f_stop"] == pytest.approx(eeg["max_freq"])
+
+    viewer.refresh()
+    qtbot.waitUntil(lambda: viewer.last_Sxx.get(0) is not None, timeout=15_000)
+    low, high = viewer.plots[0].getViewBox().viewRange()[1]
+    df = 1.0 / viewer.params["scalogram", "binsize"]
+    assert low == pytest.approx(eeg["min_freq"], abs=df)
+    assert high == pytest.approx(eeg["max_freq"], abs=df)
+
+
+def test_narrowing_the_band_zooms_the_fourier_view(qtbot, scored_window):
+    tab = tab_named(scored_window, "Signal check")
+    tab.channel.setCurrentText("EEG")
+    tab.fmin.setValue(5.0)
+    tab.fmax.setValue(12.0)
+
+    viewer = tab.docks.panel("EEG spectrum")
+    assert viewer.params["scalogram", "f_start"] == pytest.approx(5.0)
+    assert viewer.params["scalogram", "f_stop"] == pytest.approx(12.0)
+
+    viewer.last_Sxx[0] = None
+    viewer.refresh()
+    qtbot.waitUntil(lambda: viewer.last_Sxx.get(0) is not None, timeout=15_000)
+    df = 1.0 / viewer.params["scalogram", "binsize"]
+    # Only the rows inside the band are computed and drawn.
+    assert viewer.last_Sxx[0].shape[0] == pytest.approx(7.0 / df + 1, abs=1)
+
+
+def test_the_fourier_band_is_in_the_double_click_settings(scored_window):
+    tab = tab_named(scored_window, "Signal check")
+    viewer = tab.docks.panel("EEG spectrum")
+
+    names = [p.name() for p in viewer.params.param("scalogram").children()]
+    assert {"f_start", "f_stop"} <= set(names)
+    nyquist = viewer.source.sample_rate / 2
+    assert viewer.params.param("scalogram", "f_stop").opts["limits"][1] == nyquist
+
+
 def test_the_wavelet_view_can_be_switched_on(scored_window):
     from nyx.gui.viewers import NyxSpectrogramViewer, NyxTimeFreqViewer
 

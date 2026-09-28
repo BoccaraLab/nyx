@@ -140,8 +140,13 @@ class SignalTab(Tab):
             "length nyx scores on. ephyviewer's own default is 0.01 s, "
             "which at these sampling rates is a single sample and shows "
             "nothing -- these start from your parameters instead.\n\n"
+            "Min and max frequency are the band shown: they start at the "
+            "band the scoring uses, and narrowing them zooms in. Both "
+            "views honour them.\n\n"
             "Changing them retunes the view. Apply to the params writes "
-            "them into the parameters so the scoring uses them too.",
+            "them into the parameters so the scoring uses them too -- "
+            "which, for the frequency band, changes the features the "
+            "scoring is computed on.",
         )
         view_form = QFormLayout(view_box)
 
@@ -172,13 +177,26 @@ class SignalTab(Tab):
         self.overlap.setSingleStep(0.05)
         view_form.addRow("overlap", self.overlap)
 
+        self.fmin = QDoubleSpinBox()
+        self.fmin.setRange(0.0, 5000.0)
+        self.fmin.setDecimals(1)
+        self.fmin.setSuffix(" Hz")
+        view_form.addRow("min frequency", self.fmin)
+
         self.fmax = QDoubleSpinBox()
         self.fmax.setRange(1.0, 5000.0)
         self.fmax.setDecimals(1)
         self.fmax.setSuffix(" Hz")
         view_form.addRow("max frequency", self.fmax)
+        for spin in (self.fmin, self.fmax):
+            spin.setToolTip(
+                "The band the spectrogram shows -- narrow it to zoom in on "
+                "some frequencies. Starts at the band the scoring uses; the "
+                "view's own settings (double-click it) have the same range "
+                "as f_start and f_stop."
+            )
 
-        for spin in (self.binsize, self.overlap, self.fmax):
+        for spin in (self.binsize, self.overlap, self.fmin, self.fmax):
             spin.valueChanged.connect(self._settings_changed)
 
         self.channel = QComboBox()
@@ -294,6 +312,7 @@ class SignalTab(Tab):
         if self.channel.currentText() == channel:
             section["binsize"] = float(self.binsize.value())
             section["overlapratio"] = float(self.overlap.value())
+            section["min_freq"] = float(self.fmin.value())
             section["max_freq"] = float(self.fmax.value())
         params[channel] = section
         return params
@@ -320,10 +339,12 @@ class SignalTab(Tab):
         for spin, key, fallback in (
             (self.binsize, "binsize", 4.0),
             (self.overlap, "overlapratio", 0.5),
+            (self.fmin, "min_freq", 0.0),
             (self.fmax, "max_freq", 40.0),
         ):
             with self.quiet(spin):
-                spin.setValue(float(section.get(key, fallback) or fallback))
+                value = section.get(key)
+                spin.setValue(float(fallback if value is None else value))
 
     def _apply_settings(self) -> None:
         """Write the view's settings into the params the scoring will use."""
@@ -332,7 +353,8 @@ class SignalTab(Tab):
         self.session.set_params(params)
         self.status.emit(
             f"{channel}: binsize {self.binsize.value():g} s, overlap "
-            f"{self.overlap.value():g}, up to {self.fmax.value():g} Hz. "
+            f"{self.overlap.value():g}, {self.fmin.value():g}-"
+            f"{self.fmax.value():g} Hz. "
             f"The scoring will use these too."
         )
 

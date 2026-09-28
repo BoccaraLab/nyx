@@ -687,17 +687,43 @@ def spectrogram_params_from(params: dict, channel: str = "EEG") -> dict:
         settings["binsize"] = float(section["binsize"])
     if section.get("overlapratio") is not None:
         settings["overlapratio"] = float(section["overlapratio"])
+    # The band the scoring looks at, as the wavelet view already shows it.
+    # Without these the Fourier view runs to Nyquist, and at a few kHz the
+    # sleep bands are a sliver along the bottom.
+    if section.get("min_freq") is not None:
+        settings["f_start"] = float(section["min_freq"])
+    if section.get("max_freq"):
+        settings["f_stop"] = float(section["max_freq"])
     return settings
 
 
+def _frequency_rows(sample_rate: float, binsize: float, f_start: float,
+                    f_stop: float) -> tuple[int, int, float]:
+    """The STFT rows inside ``[f_start, f_stop]``: ``(first, last, df)``.
+
+    Shared by the worker, which crops to these rows, and the viewer, which
+    has to place the cropped image at the frequencies it covers. ``f_stop``
+    beyond Nyquist -- or not above ``f_start`` -- means up to Nyquist.
+    """
+    nperseg = max(int(binsize * sample_rate), 1)
+    df = sample_rate / nperseg
+    top = nperseg // 2
+    first = min(max(int(np.ceil(max(f_start, 0.0) / df)), 0), top)
+    last = top if f_stop <= f_start else min(int(np.floor(f_stop / df)), top)
+    return first, max(last, first), df
+
+
 class NyxSpectrogramWorker(SpectrogramWorker):
-    """Upstream's worker, without the debug print and the log of zero.
+    """Upstream's worker, without the debug print and the log of zero, and
+    cropped to a frequency band.
 
     Two things upstream does that are wrong in a GUI: it prints ``nperseg`` and
     ``noverlap`` to stdout on *every redraw*, and it takes ``log10`` of a
     spectrogram that can contain exact zeros -- a flat or disconnected stretch
     of signal -- which fills the console with divide-by-zero warnings and puts
-    ``-inf`` in the image.
+    ``-inf`` in the image. And it always reports 0 Hz to Nyquist; this reports
+    ``[f_start, f_stop]`` only, so auto-contrast is set by the band on screen
+    rather than by whatever sits above it.
 
     Copied rather than extended because both are in the middle of the method.
     The lines that differ are marked.
@@ -739,6 +765,12 @@ class NyxSpectrogramWorker(SpectrogramWorker):
             sig, fs=sr, nperseg=nperseg, noverlap=noverlap,
             detrend=detrend, scaling=scaling, mode=mode,
         )
+        # -- nyx: keep only the band asked for.
+        first, last, _df = _frequency_rows(
+            sr, binsize, worker_params.get("f_start", 0.0),
+            worker_params.get("f_stop", 0.0),
+        )
+        Sxx = Sxx[first:last + 1]
 
         if worker_params["scale"] == "dB" and mode == "psd":
             # -- nyx: floor it. A flat or disconnected stretch gives exact
@@ -774,6 +806,15 @@ def _spectrogram_params() -> list:
             for child in entry.get("children", []):
                 if child.get("name") == "binsize":
                     child["value"] = DEFAULT_BINSIZE
+            # The frequency range, which upstream does not have: it always
+            # draws 0 Hz to Nyquist. In the settings a double-click opens,
+            # next to the binsize. f_stop is set to Nyquist per viewer.
+            entry["children"] = list(entry["children"]) + [
+                {"name": "f_start", "type": "float", "value": 0.0, "step": 1.0,
+                 "limits": (0.0, np.inf), "suffix": "Hz"},
+                {"name": "f_stop", "type": "float", "value": 0.0, "step": 1.0,
+                 "limits": (0.0, np.inf), "suffix": "Hz"},
+            ]
     return params
 
 
@@ -827,10 +868,42 @@ class NyxSpectrogramViewer(SpectrogramViewer):
 
         self.params.param("xsize").setLimits((0, np.inf))
 
+        # Up to Nyquist until told otherwise -- what upstream shows -- and
+        # never beyond it.
+        nyquist = float(self.source.sample_rate) / 2.0
+        group = self.params.param("scalogram")
+        blocked = group.blockSignals(True)
+        try:
+            for name in ("f_start", "f_stop"):
+                group.param(name).setLimits((0.0, nyquist))
+            group.param("f_stop").setValue(nyquist)
+        finally:
+            group.blockSignals(blocked)
+
     def apply_settings(self, settings: dict) -> None:
         """Set spectrogram parameters from :func:`spectrogram_params_from`."""
         # Upstream calls the group "scalogram" even in the Fourier viewer.
         _apply_batched(self, self.params.param("scalogram"), settings)
+
+    def on_data_ready(self, chan, t, t_start, t_stop, t1, t2, Sxx):
+        """Upstream's, placing the image at the band it covers.
+
+        Upstream stretches whatever it receives over 0 Hz to Nyquist; the
+        worker now sends only ``[f_start, f_stop]``, so the image is put
+        there, and the axis shows just that range.
+        """
+        super().on_data_ready(chan, t, t_start, t_stop, t1, t2, Sxx)
+        if Sxx is None or self.images[chan] is None:
+            return
+        f_start = float(self.params["scalogram", "f_start"])
+        f_stop = float(self.params["scalogram", "f_stop"])
+        first, last, df = _frequency_rows(
+            self.source.sample_rate, float(self.params["scalogram", "binsize"]),
+            f_start, f_stop,
+        )
+        low, high = (first - 0.5) * df, (last + 0.5) * df
+        self.images[chan].setRect(QT.QRectF(t1, low, t2 - t1, high - low))
+        self.plots[chan].setYRange(max(low, 0.0), high, padding=0.0)
 
 
 def make_timefreq_viewer(source, name: str, params: dict, channel: str,
