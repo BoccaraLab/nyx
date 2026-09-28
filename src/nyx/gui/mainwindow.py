@@ -208,7 +208,16 @@ class MainWindow(QMainWindow):
 
         current = self.current_tab()
         if current is not None:
-            current.apply()
+            # A channel that is not in the file, or EEG and EMG picked as the
+            # same one, fails here rather than in the worker -- and a slot
+            # that raises only prints to a console nobody may be watching.
+            try:
+                current.apply()
+            except Exception as exc:  # noqa: BLE001 - shown, not raised
+                import traceback
+
+                self._on_failed(str(exc), traceback.format_exc(), 0)
+                return
 
         self._running_stage = stage
         self.refresh_rail()

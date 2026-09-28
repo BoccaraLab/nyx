@@ -779,13 +779,18 @@ class ScoringSession:
         if recording_spec is None and self._recording is not None:
             source = self._recording.source_path
             if source:
+                # The format and the reader's options too: a Neo file, or an
+                # EDF with its EMG in a second stream, cannot be read back
+                # from a path and two channel names alone.
                 recording_spec = RecordingSpec(
                     path=source,
+                    format=self._recording.source_format or "auto",
                     eeg_channel=self._recording.eeg_channel_name,
                     emg_channel=(
                         self._recording.emg_channel_name
                         if self._recording.has_emg else None
                     ),
+                    options=dict(self._recording.source_options),
                 )
 
         start, end = self.window

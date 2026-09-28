@@ -34,7 +34,9 @@ from nyx.gui.hypnogram import to_epoch_dict
 
 __all__ = [
     "autoscale",
+    "colour_channels",
     "fix_range",
+    "stream_source",
     "trace_sources",
     "power_source",
     "component_source",
@@ -55,6 +57,33 @@ def trace_sources(recording):
         if recording.emg is not None else None
     )
     return eeg, emg, float(getattr(eeg, "t_start", 0.0) or 0.0)
+
+
+class _NamedRecordingSource(SpikeInterfaceRecordingSource):
+    """Labels each trace ``name`` rather than by id.
+
+    Raw acquisition files number their channels ``0``, ``1``, ``2``... and keep
+    the meaningful name -- ``EMG``, ``CH12``, ``A-031`` -- in a property, which
+    is the one worth reading when deciding which trace is which.
+    """
+
+    def __init__(self, recording, names):
+        super().__init__(recording=recording)
+        self._names = [str(n) for n in names]
+
+    def get_channel_name(self, chan=0):
+        return self._names[chan]
+
+
+def stream_source(recording, names=None):
+    """Every channel of a multi-channel recording, for looking at before picking.
+
+    ``names`` defaults to the ids. Unlike :func:`trace_sources`, nothing has
+    been chosen yet: this is the whole stream.
+    """
+    if names is None:
+        names = [str(c) for c in recording.get_channel_ids()]
+    return _NamedRecordingSource(recording, names)
 
 
 def power_source(emg, t_offset: float = 0.0):
@@ -131,6 +160,23 @@ def autoscale(viewer):
         viewer.auto_scale()
     except Exception:  # noqa: BLE001 - not every viewer scales
         pass
+    return viewer
+
+
+def colour_channels(viewer, cmap: str = "tab10"):
+    """Give each channel of a trace viewer its own colour.
+
+    ephyviewer draws every channel in the same green, which is fine for one
+    trace and makes a stack of them hard to tell apart. This is what its
+    "automatic color" button does, done up front.
+    """
+    import matplotlib
+
+    colours = matplotlib.colormaps[cmap]
+    n = viewer.source.nb_channel
+    for i in range(n):
+        rgb = colours(i % colours.N)[:3]
+        viewer.by_channel_params[f"ch{i}", "color"] = [int(255 * v) for v in rgb]
     return viewer
 
 

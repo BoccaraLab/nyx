@@ -71,6 +71,17 @@ def extensions_for(format: str, *, annotations: bool = False) -> tuple[str, ...]
     """Extensions belonging to a format, ``()`` when it has none registered."""
     if annotations:
         return tuple(ANNOTATION_EXTENSIONS.get(format, ()))
+    if format == "neo":
+        # Whatever Neo reads from a single file; folder formats are picked
+        # with the folder button, and EDF has a reader of its own.
+        from nyx.io import neo_formats
+
+        return tuple(sorted({
+            f".{ext.lower()}"
+            for fmt in neo_formats().values()
+            if not fmt.is_folder and fmt.name != "EDF"
+            for ext in fmt.extensions
+        }))
     return tuple(
         sorted(ext for ext, name in RECORDING_EXTENSIONS.items() if name == format)
     )

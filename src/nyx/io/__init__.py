@@ -5,6 +5,14 @@ from nyx.io.annotations import (
     read_annotations,
     register_annotation_reader,
 )
+from nyx.io.neo import (
+    ChannelInfo,
+    describe_channels,
+    guess_neo_format,
+    neo_formats,
+    neo_streams,
+    recording_streams,
+)
 from nyx.io.recordings import (
     CHANNEL_LISTERS,
     RECORDING_EXTENSIONS,
@@ -18,6 +26,12 @@ from nyx.io.recordings import (
 __all__ = [
     "read_recording",
     "list_channels",
+    "recording_streams",
+    "describe_channels",
+    "ChannelInfo",
+    "neo_formats",
+    "guess_neo_format",
+    "neo_streams",
     "register_recording_reader",
     "register_channel_lister",
     "RECORDING_READERS",

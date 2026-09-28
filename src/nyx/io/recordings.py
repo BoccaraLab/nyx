@@ -307,10 +307,13 @@ def read_recording(
     Parameters
     ----------
     path
-        File (``.edf``, ``.npz``) or folder (spikeinterface) to read.
+        File (``.edf``, ``.npz``, or anything Neo reads) or folder
+        (spikeinterface, or a Neo folder format such as Open Ephys) to read.
     format
         One of :data:`RECORDING_READERS`, or ``"auto"`` to infer it from the
-        path. Currently: ``"edf"``, ``"spikeinterface"``, ``"npz"``.
+        path. Currently: ``"edf"``, ``"spikeinterface"``, ``"npz"``, and
+        ``"neo"`` for everything else -- see :mod:`nyx.io.neo` for its
+        options (``neo_format``, ``stream_id``, ``emg_stream_id``).
     eeg_channel, emg_channel
         Channel position (``0`` = first channel in the file) or channel name.
         ``emg_channel=None`` loads no EMG at all -- possible, but a long way
@@ -356,6 +359,8 @@ def read_recording(
         name=name or os.path.splitext(os.path.basename(path.rstrip("/\\")))[0],
         source_path=path,
         emg_fs_=(float(emg_fs) if emg_fs and float(emg_fs) != float(fs) else None),
+        source_format=format,
+        source_options=dict(kwargs),
     )
 
 
@@ -444,13 +449,30 @@ def list_channels(path: str, format: str = "auto", **kwargs) -> list[str]:
     return [str(name) for name in lister(path, **kwargs)]
 
 
+#: Files spikeinterface writes into a folder it saves, by version.
+_SPIKEINTERFACE_MARKERS = ("si_folder.json", "spikeinterface_info.json")
+
+
 def _infer_format(path: str) -> str:
+    """nyx's own formats by extension, then whatever Neo recognises.
+
+    A folder spikeinterface saved is ``"spikeinterface"``; any other folder
+    (Open Ephys, SpikeGLX, Neuralynx...) is offered to Neo, and falls back to
+    spikeinterface only if Neo does not recognise it either.
+    """
+    from nyx.io.neo import guess_neo_format
+
     if os.path.isdir(path):
-        return "spikeinterface"
+        if any(os.path.exists(os.path.join(path, m)) for m in _SPIKEINTERFACE_MARKERS):
+            return "spikeinterface"
+        return "neo" if guess_neo_format(path) else "spikeinterface"
     ext = os.path.splitext(path)[1].lower()
     if ext in RECORDING_EXTENSIONS:
         return RECORDING_EXTENSIONS[ext]
+    if guess_neo_format(path):
+        return "neo"
     raise ValueError(
         f"Cannot infer the format of {path!r} from its extension ({ext!r}). "
-        f"Pass format= explicitly, one of: {sorted(RECORDING_READERS)}."
+        f"Pass format= explicitly, one of: {sorted(RECORDING_READERS)}; for "
+        f"format='neo', neo_format= names the Neo format."
     )

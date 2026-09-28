@@ -187,7 +187,7 @@ everything downstream is marked stale, but the signal check above it is not.
 
 | tab | the decision |
 |---|---|
-| Recording | which file, which two channels, which parameters |
+| Recording | which file, which two channels — every channel drawn and listed first, so you pick by looking — and which parameters |
 | Signal check | the mains notch, and where to start and stop |
 | EMG threshold | where the wake/sleep cut goes — **drag it**, on the distribution or on the power trace; they are the same line |
 | Sleep stages | components, clustering, and which cluster is REM |
@@ -217,6 +217,42 @@ Nothing in it is required: the notebooks and `score_recording` are unchanged.
 Its views come from [ephyviewer](https://github.com/NeuralEnsemble/ephyviewer),
 used as published — the sleep-specific parts (a scalogram in dB, the curation
 shortcuts) are subclasses in [`nyx/gui/viewers.py`](src/nyx/gui/viewers.py).
+
+## Viewing data
+
+Which channel is the EEG and which the EMG is rarely obvious from a raw file,
+so the GUI shows you before asking. Open a recording in the **Recording** tab —
+EDF, a spikeinterface folder, or anything [Neo](https://neo.readthedocs.io)
+reads, raw acquisition files included: Open Ephys, Intan, SpikeGLX, Spike2,
+Blackrock, Plexon, Neuralynx, TDT and more. Leave the format on `auto` and Neo
+recognises the file, or choose `neo` and name the Neo format yourself. Folder
+formats (Open Ephys, SpikeGLX...) open with the **Folder...** button.
+
+Before anything is loaded, the tab then shows:
+
+- **every channel of every stream**, stacked, labelled and scrollable — one
+  tab per stream when the file has several at different rates;
+- **a table of what the file says about each one**: name, id, stream, rate,
+  unit, gain and length.
+
+Scroll through the traces, select a row in the table and press **use as EEG**
+or **use as EMG** (or pick from the two lists on the left); the table marks
+what is chosen. The EEG and the EMG may come from different streams — an EMG
+on an auxiliary input at a lower rate is read at its own rate. **Load** then
+reads just those two channels, and `run.json` records the format, the streams
+and the channel names, so a saved run reads the file the same way again.
+
+For just looking — no scoring — the `gui` extra also installs ephyviewer's
+standalone viewer, which reads the same Neo formats and shows any events,
+epochs or spikes the file holds as well:
+
+```bash
+nyx-ephyviewer                    # pick a format, then the file or folder
+nyx-ephyviewer recording.edf      # open it directly; format from the extension
+nyx-ephyviewer session/ -f OpenEphysBinary   # say the format when it can't be guessed
+```
+
+Neither converts or writes anything, so both are safe on the original data.
 
 ---
 
@@ -261,7 +297,24 @@ needs no code:
 | `edf` / `bdf` | `interval_csv` — `time,duration,label` |
 | `spikeinterface` folders | `epoch_csv` — one row per epoch, any stage coding |
 | `npz` | `column_csv` — one column per recording |
-| | `nsrr_xml`, `visbrain_hyp`, `epoch_npy`, `epoch_mat` |
+| `neo` — anything [Neo](https://neo.readthedocs.io) reads: Open Ephys, Intan, SpikeGLX, Spike2, Blackrock, Plexon, Neuralynx, TDT... | `nsrr_xml`, `visbrain_hyp`, `epoch_npy`, `epoch_mat` |
+
+Raw files straight off the acquisition system are read through Neo, and
+`format="auto"` hands them to it when nyx does not know the extension:
+
+```python
+nyx.io.neo_formats()                       # the Neo formats available
+recording = nyx.read_recording(
+    "2024-05-01_mouse01/", format="neo", neo_format="OpenEphysBinary",
+    eeg_channel="CH12", emg_channel="AUX1", emg_stream_id="1",
+)
+```
+
+`neo_format` can usually be left out; Neo recognises the file. When the EMG is
+in a different stream from the EEG (an auxiliary input, say, at a lower rate),
+`emg_stream_id` says which. To see what a file holds before choosing,
+`nyx.io.describe_channels(nyx.io.recording_streams(path))` lists every channel
+with its stream, rate, unit and gain.
 
 Channels are selected by position **or** by name (`eeg_channel="C3_M2"`).
 Anything unusual can be registered from your own code — see

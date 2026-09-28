@@ -5,14 +5,20 @@ way round produces a scoring that looks plausible and is wrong, and the only
 defence is looking at what was actually picked -- which is why
 ``Recording.describe()`` is on screen rather than in a log.
 
-The channel lists come from :func:`nyx.io.list_channels`, so a channel is
-chosen from what the file contains rather than typed as an index and hoped for.
+The channel lists come from the file, so a channel is chosen from what it
+contains rather than typed as an index and hoped for. For EDF, spikeinterface
+folders and anything Neo reads (``format="neo"``: Open Ephys, Intan, SpikeGLX,
+Spike2...), the tab goes further before anything is loaded: every channel of
+every stream is drawn, scrollable, beside a table of what the file says about
+each one -- name, stream, rate, unit, gain -- so the EEG and the EMG can be
+told apart by looking rather than by guessing from a raw file's numbering.
 """
 
 from __future__ import annotations
 
 import os
 
+from ephyviewer import TraceViewer
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -32,14 +38,19 @@ from nyx.gui.filters import (
     recording_filters,
     recording_formats,
 )
-from nyx.gui.panels import TextPanel
+from nyx.gui.panels import ChannelTablePanel, TextPanel
 from nyx.gui.session import Stage
+from nyx.gui.sources import autoscale, colour_channels, stream_source
 from nyx.gui.tabs.base import Tab
 from nyx.gui.widgets import Section
 
 __all__ = ["LoadTab"]
 
 _NO_EMG = "(no EMG)"
+_AUTO = "auto"
+
+#: Formats whose every channel can be opened for a look before choosing.
+_BROWSABLE = ("neo", "edf", "spikeinterface")
 
 
 class LoadTab(Tab):
@@ -63,25 +74,42 @@ class LoadTab(Tab):
             "Check the summary panel before moving on. EEG and EMG the "
             "wrong way round gives a scoring that looks entirely "
             "plausible and is wrong.\n\n"
-            "spikeinterface recordings are a folder rather than a file, "
-            "which is what the second browse button is for.",
+            "Raw files from an acquisition system -- Open Ephys, Intan, "
+            "SpikeGLX, Spike2, Blackrock, Plexon, Neuralynx, TDT and more "
+            "-- are read through Neo: format 'neo', or 'auto' and let Neo "
+            "recognise it. Every channel is then drawn on the right with a "
+            "table of what the file says about it; select a row there and "
+            "use it as the EEG or the EMG.\n\n"
+            "Several formats (spikeinterface, Open Ephys, SpikeGLX...) are "
+            "a folder rather than a file, which is what the second browse "
+            "button is for.",
         )
-        form = QFormLayout(recording_box)
+        self._form = form = QFormLayout(recording_box)
 
         self.path = QLineEdit()
-        self.path.setPlaceholderText("Choose a file, or a folder for spikeinterface")
+        self.path.setPlaceholderText("Choose a file, or a folder")
         browse_file = QPushButton("File...")
         browse_file.clicked.connect(self._browse_file)
         browse_folder = QPushButton("Folder...")
         browse_folder.clicked.connect(self._browse_folder)
         browse_folder.setToolTip(
-            "spikeinterface recordings are a folder, not a file."
+            "For recordings stored as a folder: spikeinterface, Open Ephys, "
+            "SpikeGLX, Neuralynx, TDT..."
         )
         form.addRow("path", _row(self.path, browse_file, browse_folder))
 
         self.format = QComboBox()
-        self.format.addItems(["auto", *recording_formats()])
+        self.format.addItems([_AUTO, *recording_formats()])
         form.addRow("format", self.format)
+
+        self.neo_format = QComboBox()
+        self.neo_format.addItems([_AUTO, *nyx.io.neo_formats()])
+        self.neo_format.setToolTip(
+            "Which Neo reader to use. 'auto' lets Neo recognise the file "
+            "from its extension or the folder's contents."
+        )
+        form.addRow("Neo format", self.neo_format)
+        form.setRowVisible(self.neo_format, False)
 
         self.eeg_channel = QComboBox()
         self.eeg_channel.setEditable(True)
@@ -160,6 +188,13 @@ class LoadTab(Tab):
 
         self.path.editingFinished.connect(self._offer_channels)
         self.format.currentTextChanged.connect(self._offer_channels)
+        self.neo_format.currentTextChanged.connect(self._offer_channels)
+        self.eeg_channel.currentIndexChanged.connect(self._mark_chosen)
+        self.emg_channel.currentIndexChanged.connect(self._mark_chosen)
+
+        #: What the file says about each channel, when it can be browsed.
+        self._channels: list = []
+        self._previewed: tuple | None = None
 
         # Only seed the session when it has nothing. Loading a preset here
         # unconditionally would invalidate a session that arrived already
@@ -175,6 +210,8 @@ class LoadTab(Tab):
         self.summary = TextPanel(
             "what was loaded", placeholder="Nothing loaded yet."
         )
+        self.channel_table = ChannelTablePanel("channels in the file")
+        self.channel_table.use_requested.connect(self._use_channel)
         self.docks.add(self.summary)
 
     # -- browsing ----------------------------------------------------------
@@ -193,7 +230,10 @@ class LoadTab(Tab):
         )
         if path:
             self.path.setText(path)
-            self.format.setCurrentText("spikeinterface")
+            # auto tells a folder spikeinterface saved from one Neo reads.
+            if self.format.currentText() not in ("spikeinterface", "neo"):
+                with self.quiet(self.format):
+                    self.format.setCurrentText(_AUTO)
             self._offer_channels()
 
     def _browse_params(self) -> None:
@@ -216,18 +256,34 @@ class LoadTab(Tab):
         """Fill the channel combos from the file, without loading it."""
         path = self.path.text().strip()
         if not path or not os.path.exists(path):
+            self._form.setRowVisible(self.neo_format, self.format.currentText() == "neo")
             return
 
         format = self.format.currentText()
         try:
-            resolved = format if format != "auto" else _infer(path)
+            resolved = format if format != _AUTO else _infer(path)
+        except Exception as exc:  # noqa: BLE001 - shown, not raised
+            self._form.setRowVisible(self.neo_format, False)
+            self._clear_preview()
+            self.channel_note.setText(
+                f"{exc}\n\nIf this is a raw acquisition file, set the format "
+                f"to 'neo' and pick the Neo format."
+            )
+            return
+        self._form.setRowVisible(self.neo_format, resolved == "neo")
+
+        if resolved in _BROWSABLE and self._offer_every_channel(path, resolved):
+            return
+        self._clear_preview()
+
+        try:
             if not can_list_channels(resolved):
                 self.channel_note.setText(
                     f"Cannot list channels for {resolved!r} -- type a name or "
                     f"an index (0 is the first channel)."
                 )
                 return
-            names = nyx.io.list_channels(path, format=format)
+            names = nyx.io.list_channels(path, format=resolved, **self._neo_kwargs())
         except Exception as exc:  # noqa: BLE001 - shown, not raised
             self.channel_note.setText(f"Could not read the channels: {exc}")
             return
@@ -249,6 +305,125 @@ class LoadTab(Tab):
             f"{len(names)} channel(s) in the file."
             + ("" if len(names) > 1 else "  Only one -- there is no EMG to pick.")
         )
+
+    def _neo_kwargs(self) -> dict:
+        chosen = self.neo_format.currentText()
+        return {} if chosen == _AUTO else {"neo_format": chosen}
+
+    def _offer_every_channel(self, path: str, format: str) -> bool:
+        """Open every stream, draw every channel, list them with their metadata.
+
+        Returns ``False`` when the file cannot be opened this way, so the plain
+        channel list is tried instead -- an EDF that only MNE will read, say.
+        """
+        kwargs = self._neo_kwargs() if format == "neo" else {}
+        key = (path, format, tuple(sorted(kwargs.items())))
+        if key == self._previewed:
+            return True
+        try:
+            streams = nyx.io.recording_streams(path, format=format, **kwargs)
+            channels = nyx.io.describe_channels(streams)
+        except Exception as exc:  # noqa: BLE001 - fall back, and say why
+            self.channel_note.setText(f"Could not open every channel: {exc}")
+            return False
+        if not channels:
+            return False
+
+        self._channels = channels
+        self._previewed = key
+        self._build_preview(streams, channels)
+
+        # One channel is an EEG with no EMG, whatever it is called.
+        emg_default = (
+            _guess(channels, "emg", avoid=None) if len(channels) > 1 else None
+        )
+        eeg_default = _guess(channels, "eeg", avoid=emg_default)
+        for combo, default, extra in (
+            (self.eeg_channel, eeg_default, []),
+            (self.emg_channel, emg_default, [_NO_EMG]),
+        ):
+            with self.quiet(combo):
+                combo.clear()
+                # The row in self._channels, not the ChannelInfo itself: Qt
+                # cannot find a Python object again by value.
+                for row, channel in enumerate(channels):
+                    combo.addItem(_label(channel, channels), row)
+                for text in extra:
+                    combo.addItem(text, None)
+                combo.setCurrentIndex(
+                    channels.index(default) if default is not None else len(channels)
+                )
+        self._mark_chosen()
+
+        n_streams = len({c.stream_id for c in channels})
+        guessed = ""
+        if format == "neo" and not kwargs:
+            guessed = f" Read as {nyx.io.guess_neo_format(path)}."
+        self.channel_note.setText(
+            f"{len(channels)} channel(s)"
+            + (f" in {n_streams} streams" if n_streams > 1 else "")
+            + f".{guessed} Every one is drawn on the right: scroll through "
+            "them, then pick the EEG and the EMG here or from the table."
+        )
+        return True
+
+    def _build_preview(self, streams, channels) -> None:
+        self.docks.clear()
+        first = None
+        for stream_id, stream_name, rec in streams:
+            names = [c.name for c in channels if c.stream_id == stream_id]
+            title = "all channels" if len(streams) == 1 else f"{stream_name}"
+            viewer = TraceViewer(source=stream_source(rec, names), name=title)
+            # Stacked one above the other, each labelled, and in its own
+            # colour -- left alone they are all drawn on the same baseline,
+            # in the same green, and look like one trace.
+            viewer.params["scale_mode"] = "same_for_all"
+            viewer.params["display_labels"] = True
+            colour_channels(viewer)
+            autoscale(viewer)
+            if first is None:
+                self.docks.add(viewer)
+                first = title
+            else:
+                self.docks.add(viewer, tabify_with=first)
+        self.channel_table.set_channels(channels)
+        self.docks.add(self.channel_table)
+        self.docks.add(self.summary, tabify_with=self.channel_table.name)
+        # Tabified last, so it would be the one in front.
+        self.docks.viewers[self.channel_table.name]["dock"].raise_()
+
+    def _clear_preview(self) -> None:
+        if self._previewed is None and not self._channels:
+            return
+        self._channels = []
+        self._previewed = None
+        self.docks.clear()
+        self.docks.add(self.summary)
+
+    def _use_channel(self, role: str, channel) -> None:
+        combo = self.eeg_channel if role == "EEG" else self.emg_channel
+        if channel in self._channels:
+            combo.setCurrentIndex(self._channels.index(channel))
+
+    def _chosen(self, combo):
+        """The ``ChannelInfo`` a combo is on; ``None`` if typed or '(no EMG)'.
+
+        The combos stay editable, so what is shown may have been typed over an
+        item; only an item still showing its own label counts as picked.
+        """
+        index = combo.currentIndex()
+        if index < 0 or combo.itemText(index) != combo.currentText():
+            return None
+        row = combo.itemData(index)
+        if row is None or not 0 <= int(row) < len(self._channels):
+            return None
+        return self._channels[int(row)]
+
+    def _mark_chosen(self, *_args) -> None:
+        if not self._channels:
+            return
+        self.channel_table.mark("EEG", self._chosen(self.eeg_channel))
+        self.channel_table.mark("EMG", self._chosen(self.emg_channel))
 
     # -- loading -----------------------------------------------------------
 
@@ -285,12 +460,46 @@ class LoadTab(Tab):
             return
 
         emg = self.emg_channel.currentText()
-        recording = nyx.read_recording(
-            path,
-            format=self.format.currentText(),
-            eeg_channel=_channel(self.eeg_channel.currentText()),
-            emg_channel=None if emg in ("", _NO_EMG) else _channel(emg),
-        )
+        format = self.format.currentText()
+        eeg_info = self._chosen(self.eeg_channel)
+        emg_info = self._chosen(self.emg_channel)
+
+        if eeg_info is not None:
+            # Picked from the file's own channels: select by what identifies
+            # the channel in its stream, and say which stream.
+            if emg_info == eeg_info:
+                raise ValueError(
+                    f"The EEG and the EMG are both {eeg_info.name!r}. Pick "
+                    f"two different channels -- or '(no EMG)'."
+                )
+            if emg_info is not None:
+                emg_spec = _selector(emg_info, self._channels)
+            elif emg in ("", _NO_EMG):
+                emg_spec = None
+            else:
+                emg_spec = _channel(emg)
+
+            format = _infer(path) if format == _AUTO else format
+            kwargs = self._neo_kwargs() if format == "neo" else {}
+            if len({c.stream_id for c in self._channels}) > 1:
+                kwargs["stream_id"] = eeg_info.stream_id
+                if emg_info is not None and emg_info.stream_id != eeg_info.stream_id:
+                    kwargs["emg_stream_id"] = emg_info.stream_id
+            recording = nyx.read_recording(
+                path,
+                format=format,
+                eeg_channel=_selector(eeg_info, self._channels),
+                emg_channel=emg_spec,
+                **kwargs,
+            )
+        else:
+            recording = nyx.read_recording(
+                path,
+                format=format,
+                eeg_channel=_channel(self.eeg_channel.currentText()),
+                emg_channel=None if emg in ("", _NO_EMG) else _channel(emg),
+                **(self._neo_kwargs() if format == "neo" else {}),
+            )
 
         reference = None
         reference_path = self.reference_path.text().strip()
@@ -348,6 +557,49 @@ def _channel(text: str):
     """A channel is an index or a name; digits mean an index."""
     text = text.strip()
     return int(text) if text.lstrip("-").isdigit() else text
+
+
+def _label(channel, channels) -> str:
+    """How a channel reads in a combo: its name, and whatever tells it apart."""
+    parts = [channel.name]
+    if channel.channel_id != channel.name:
+        parts.append(f"id {channel.channel_id}")
+    parts.append(f"{channel.fs:g} Hz")
+    if len({c.stream_id for c in channels}) > 1:
+        parts.append(channel.stream_name)
+    return f"{parts[0]}  ({', '.join(parts[1:])})"
+
+
+def _selector(channel, channels) -> str:
+    """What to pass as ``eeg_channel`` / ``emg_channel`` for this channel.
+
+    Its name when that is unambiguous within the stream, since a name is what
+    a saved run.json should say -- ``"EMG"``, not ``"2"``. Otherwise the id:
+    raw files repeat names, and a name that is also another channel's id
+    would select that channel instead (ids are matched first).
+    """
+    same_stream = [c for c in channels if c.stream_id == channel.stream_id]
+    names = [c.name for c in same_stream]
+    other_ids = {c.channel_id for c in same_stream if c is not channel}
+    if names.count(channel.name) == 1 and channel.name not in other_ids:
+        return channel.name
+    return channel.channel_id
+
+
+def _guess(channels, role: str, avoid):
+    """A starting choice: the first channel named like ``role``, else by position.
+
+    Only a default -- the table and the traces are there to check it.
+    """
+    for channel in channels:
+        if role in channel.name.lower() and channel is not avoid:
+            return channel
+    if role == "emg":
+        return channels[1] if len(channels) > 1 else channels[0]
+    for channel in channels:
+        if channel is not avoid:
+            return channel
+    return channels[0]
 
 
 def _parse_label_map(text: str) -> dict:

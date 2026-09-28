@@ -193,4 +193,6 @@ def preprocess_recording(recording: Recording, params: dict) -> Recording:
         name=recording.name,
         source_path=recording.source_path,
         emg_fs_=(emg_fs if emg_fs != eeg_fs else None),
+        source_format=recording.source_format,
+        source_options=recording.source_options,
     )

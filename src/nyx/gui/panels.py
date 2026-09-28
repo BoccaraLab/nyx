@@ -28,7 +28,8 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 from nyx.gui.canvas import FigureView, PanelCanvas
 
 __all__ = [
-    "DockHost", "MplPanel", "TextPanel", "brighten_icons", "lighten_icon_map",
+    "DockHost", "MplPanel", "TextPanel", "ChannelTablePanel",
+    "brighten_icons", "lighten_icon_map",
 ]
 
 #: Marks a widget whose icons have already been lightened, so a panel that is
@@ -283,3 +284,99 @@ class TextPanel(_Dockable):
 
     def set_text(self, value: str) -> None:
         self.text.setPlainText(str(value))
+
+
+class ChannelTablePanel(_Dockable):
+    """Every channel in a file, with what the file says about it.
+
+    For telling channels apart before two are chosen: the name, the stream,
+    the rate and the unit usually say which one is the EMG long before the
+    trace does. Select a row and use the buttons to make it the EEG or the
+    EMG; :attr:`use_requested` carries the role and the row's
+    :class:`~nyx.io.ChannelInfo`.
+    """
+
+    default_location = "bottom"
+    use_requested = Signal(str, object)
+
+    _COLUMNS = ("use as", "name", "id", "stream", "rate (Hz)", "unit", "gain",
+                "length (s)")
+
+    def __init__(self, name: str, parent=None):
+        from PySide6.QtWidgets import (
+            QAbstractItemView,
+            QHBoxLayout,
+            QLabel,
+            QPushButton,
+            QTableWidget,
+        )
+
+        super().__init__(name, parent)
+        self.channels: list = []
+        self._roles: dict[str, int] = {}
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        bar = QHBoxLayout()
+        bar.addWidget(QLabel("Selected channel:"))
+        for role in ("EEG", "EMG"):
+            button = QPushButton(f"use as {role}")
+            button.clicked.connect(lambda _=False, r=role: self._use(r))
+            bar.addWidget(button)
+        bar.addStretch(1)
+        layout.addLayout(bar)
+
+        self.table = QTableWidget(0, len(self._COLUMNS))
+        self.table.setHorizontalHeaderLabels(self._COLUMNS)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.table)
+
+    def set_channels(self, channels) -> None:
+        from PySide6.QtWidgets import QTableWidgetItem
+
+        self.channels = list(channels)
+        self._roles = {}
+        streams = {c.stream_id for c in self.channels}
+        self.table.setRowCount(len(self.channels))
+        for row, c in enumerate(self.channels):
+            values = (
+                "",
+                c.name,
+                c.channel_id,
+                c.stream_name if len(streams) > 1 else "",
+                f"{c.fs:g}",
+                c.unit,
+                "" if c.gain is None else f"{c.gain:.6g}",
+                f"{c.duration:.1f}",
+            )
+            for column, value in enumerate(values):
+                self.table.setItem(row, column, QTableWidgetItem(value))
+        self.table.setColumnHidden(3, len(streams) <= 1)
+        self.table.resizeColumnsToContents()
+
+    def mark(self, role: str, channel) -> None:
+        """Show ``role`` against ``channel`` (a ``ChannelInfo`` or ``None``)."""
+        from PySide6.QtGui import QFont
+
+        self._roles.pop(role, None)
+        if channel is not None and channel in self.channels:
+            self._roles[role] = self.channels.index(channel)
+        bold = QFont()
+        bold.setBold(True)
+        for row in range(self.table.rowCount()):
+            label = " + ".join(r for r, i in sorted(self._roles.items()) if i == row)
+            item = self.table.item(row, 0)
+            item.setText(label)
+            for column in range(self.table.columnCount()):
+                cell = self.table.item(row, column)
+                cell.setFont(bold if label else QFont())
+
+    def _use(self, role: str) -> None:
+        rows = self.table.selectionModel().selectedRows()
+        if rows:
+            self.use_requested.emit(role, self.channels[rows[0].row()])

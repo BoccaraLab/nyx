@@ -59,6 +59,11 @@ class Recording:
     #: often store EMG in a separate stream at a different rate (CCSHS, for
     #: instance). ``None`` means the two share :attr:`fs`.
     emg_fs_: float | None = None
+    #: How :attr:`source_path` was read -- the format and the reader's extra
+    #: options (``stream_id``, ``neo_format``...) -- so a saved run can read
+    #: it the same way again. Empty for a recording built in memory.
+    source_format: str = ""
+    source_options: dict = field(default_factory=dict)
 
     @property
     def has_emg(self) -> bool:
@@ -144,6 +149,8 @@ class Recording:
             name=self.name,
             source_path=self.source_path,
             emg_fs_=self.emg_fs_,
+            source_format=self.source_format,
+            source_options=self.source_options,
         )
 
     def describe(self) -> str:

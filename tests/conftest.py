@@ -47,3 +47,32 @@ def synthetic_recording(synthetic, tmp_path_factory):
 def params():
     """Parameters matching the synthetic signal's frequency content."""
     return demo_params()
+
+
+@pytest.fixture(scope="session")
+def two_stream_edf(tmp_path_factory):
+    """An EDF with EEG1 and EEG2 at 256 Hz and the EMG in a second stream at 128.
+
+    Two streams at different rates, the way a lot of acquisition files are.
+    Neo writes almost none of the formats it reads, so this is what the Neo
+    path is tested on: read as ``format="neo"`` it goes the same way an Open
+    Ephys folder or an Intan file would.
+    """
+    pyedflib = pytest.importorskip("pyedflib")
+
+    path = tmp_path_factory.mktemp("neo") / "two_streams.edf"
+    rates = {"EEG1": 256, "EEG2": 256, "EMG": 128}
+    writer = pyedflib.EdfWriter(str(path), len(rates))
+    try:
+        writer.setSignalHeaders([
+            {"label": label, "dimension": "uV", "sample_frequency": fs,
+             "physical_min": -500.0, "physical_max": 500.0,
+             "digital_min": -32768, "digital_max": 32767,
+             "transducer": "", "prefilter": ""}
+            for label, fs in rates.items()
+        ])
+        rng = np.random.default_rng(0)
+        writer.writeSamples([rng.normal(0, 50, fs * 10) for fs in rates.values()])
+    finally:
+        writer.close()
+    return str(path)
