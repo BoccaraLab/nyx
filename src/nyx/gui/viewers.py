@@ -892,15 +892,21 @@ class NyxSpectrogramViewer(SpectrogramViewer):
         worker now sends only ``[f_start, f_stop]``, so the image is put
         there, and the axis shows just that range.
         """
+        first, last, df = _frequency_rows(
+            self.source.sample_rate, float(self.params["scalogram", "binsize"]),
+            float(self.params["scalogram", "f_start"]),
+            float(self.params["scalogram", "f_stop"]),
+        )
+        # A request made before the band or the binsize changed can land
+        # after it. Its rows are some other band, and placed at this one
+        # they would stretch the wrong image over the axis. A request for
+        # the current settings is already on its way, so drop this one.
+        if Sxx is not None and Sxx.shape[0] != last - first + 1:
+            return
+
         super().on_data_ready(chan, t, t_start, t_stop, t1, t2, Sxx)
         if Sxx is None or self.images[chan] is None:
             return
-        f_start = float(self.params["scalogram", "f_start"])
-        f_stop = float(self.params["scalogram", "f_stop"])
-        first, last, df = _frequency_rows(
-            self.source.sample_rate, float(self.params["scalogram", "binsize"]),
-            f_start, f_stop,
-        )
         low, high = (first - 0.5) * df, (last + 0.5) * df
         self.images[chan].setRect(QT.QRectF(t1, low, t2 - t1, high - low))
         self.plots[chan].setYRange(max(low, 0.0), high, padding=0.0)

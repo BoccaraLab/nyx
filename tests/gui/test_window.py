@@ -328,6 +328,27 @@ def test_narrowing_the_band_zooms_the_fourier_view(qtbot, scored_window):
     assert viewer.last_Sxx[0].shape[0] == pytest.approx(7.0 / df + 1, abs=1)
 
 
+def test_a_spectrogram_for_the_old_band_is_not_drawn(scored_window):
+    """One requested before the band changed can arrive after it.
+
+    It failed in CI, where the runner is slow enough for that to happen:
+    the stale image was stored and stretched over the new band's axis.
+    """
+    import numpy as np
+
+    tab = tab_named(scored_window, "Signal check")
+    tab.channel.setCurrentText("EEG")
+    tab.fmin.setValue(5.0)
+    tab.fmax.setValue(12.0)
+    viewer = tab.docks.panel("EEG spectrum")
+    viewer.last_Sxx[0] = None
+
+    stale = np.zeros((80, 10))   # the rows of a wider band
+    viewer.on_data_ready(0, viewer.t, 0.0, 10.0, 0.0, 10.0, stale)
+
+    assert viewer.last_Sxx[0] is None
+
+
 def test_the_fourier_band_is_in_the_double_click_settings(scored_window):
     tab = tab_named(scored_window, "Signal check")
     viewer = tab.docks.panel("EEG spectrum")
