@@ -7,8 +7,11 @@ from nyx.io.annotations import (
 )
 from nyx.io.neo import (
     ChannelInfo,
+    check_intan_timestamps,
     describe_channels,
     guess_neo_format,
+    intan_layout,
+    intan_unchecked_note,
     neo_formats,
     neo_streams,
     recording_streams,
@@ -32,6 +35,9 @@ __all__ = [
     "neo_formats",
     "guess_neo_format",
     "neo_streams",
+    "intan_layout",
+    "intan_unchecked_note",
+    "check_intan_timestamps",
     "register_recording_reader",
     "register_channel_lister",
     "RECORDING_READERS",

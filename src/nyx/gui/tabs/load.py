@@ -196,6 +196,18 @@ class LoadTab(Tab):
         self._channels: list = []
         self._previewed: tuple | None = None
 
+        # Opening a file to list its channels runs here rather than on the
+        # window's runner: it is not a pipeline stage, and must not wait
+        # behind one or mark the window busy.
+        from nyx.gui.jobs import JobRunner
+
+        self._reader = JobRunner(self)
+        self._reader.finished.connect(self._on_read)
+        self._reader.failed.connect(self._on_read_failed)
+        #: Every file asked for, by job generation; the last is the one wanted.
+        self._requests: list[tuple] = []
+        self._reading_key: tuple | None = None
+
         # Only seed the session when it has nothing. Loading a preset here
         # unconditionally would invalidate a session that arrived already
         # configured -- a resumed run.json, or one the tests built.
@@ -259,6 +271,8 @@ class LoadTab(Tab):
             self._form.setRowVisible(self.neo_format, self.format.currentText() == "neo")
             return
 
+        # Whatever was being read is no longer what is wanted.
+        self._reading_key = None
         format = self.format.currentText()
         try:
             resolved = format if format != _AUTO else _infer(path)
@@ -272,10 +286,14 @@ class LoadTab(Tab):
             return
         self._form.setRowVisible(self.neo_format, resolved == "neo")
 
-        if resolved in _BROWSABLE and self._offer_every_channel(path, resolved):
+        if resolved in _BROWSABLE:
+            self._offer_every_channel(path, resolved)
             return
-        self._clear_preview()
+        self._offer_channel_names(path, resolved)
 
+    def _offer_channel_names(self, path: str, resolved: str) -> None:
+        """The plain list of channel names, for a file that cannot be browsed."""
+        self._clear_preview()
         try:
             if not can_list_channels(resolved):
                 self.channel_note.setText(
@@ -310,25 +328,73 @@ class LoadTab(Tab):
         chosen = self.neo_format.currentText()
         return {} if chosen == _AUTO else {"neo_format": chosen}
 
-    def _offer_every_channel(self, path: str, format: str) -> bool:
+    def _offer_every_channel(self, path: str, format: str) -> None:
         """Open every stream, draw every channel, list them with their metadata.
 
-        Returns ``False`` when the file cannot be opened this way, so the plain
-        channel list is tried instead -- an EDF that only MNE will read, say.
+        Opening is done on a worker: a raw file on a network share can take a
+        while, and a window that stops responding meanwhile looks crashed.
+        The latest request wins -- choosing another file while one is being
+        read drops the first one's result when it arrives.
+
+        When the file cannot be opened this way, the plain channel list is
+        tried instead -- an EDF that only MNE will read, say.
         """
         kwargs = self._neo_kwargs() if format == "neo" else {}
         key = (path, format, tuple(sorted(kwargs.items())))
         if key == self._previewed:
-            return True
-        try:
-            streams = nyx.io.recording_streams(path, format=format, **kwargs)
-            channels = nyx.io.describe_channels(streams)
-        except Exception as exc:  # noqa: BLE001 - fall back, and say why
-            self.channel_note.setText(f"Could not open every channel: {exc}")
-            return False
-        if not channels:
-            return False
+            return
+        self._reading_key = key
+        generation = len(self._requests)
+        self._requests.append(key)
 
+        if _edf_backed(path, format, kwargs):
+            # EDF goes through pyedflib, whose C library keeps its open files
+            # in global tables with no locking: opening one on a worker while
+            # the last preview's reader is freed here is an access violation.
+            # An EDF header is small, so it is read here instead.
+            try:
+                value = _open_every_stream(path, format, kwargs)
+            except Exception as exc:  # noqa: BLE001 - shown, not raised
+                self._on_read_failed(f"{type(exc).__name__}: {exc}", "", generation)
+                return
+            self._on_read(value, generation)
+            return
+
+        name = os.path.basename(path.rstrip("/\\"))
+        self.channel_note.setText(f"Reading the channels of {name}...")
+        self._reader.submit(
+            _open_every_stream, path, format, kwargs,
+            description="Reading the channels", generation=generation,
+        )
+
+    def _on_read(self, value, generation: int) -> None:
+        key = self._requests[generation]
+        if key != self._reading_key:
+            return   # another file was chosen while this one was read
+        self._reading_key = None
+        path, format, kwargs = key[0], key[1], dict(key[2])
+        streams, channels = value
+        if not channels:
+            self._offer_channel_names(path, format)
+            return
+        self._show_every_channel(path, format, kwargs, key, streams, channels)
+
+    def _on_read_failed(self, message: str, _tb: str, generation: int) -> None:
+        key = self._requests[generation]
+        if key != self._reading_key:
+            return
+        self._reading_key = None
+        self._offer_channel_names(key[0], key[1])
+        self.channel_note.setText(
+            f"Could not open every channel ({message}). "
+            + self.channel_note.text()
+        )
+
+    def reading(self) -> bool:
+        """Whether a file's channels are still being read."""
+        return self._reading_key is not None
+
+    def _show_every_channel(self, path, format, kwargs, key, streams, channels):
         self._channels = channels
         self._previewed = key
         self._build_preview(streams, channels)
@@ -365,7 +431,10 @@ class LoadTab(Tab):
             + f".{guessed} Every one is drawn on the right: scroll through "
             "them, then pick the EEG and the EMG here or from the table."
         )
-        return True
+        # Said every time the file is opened, not once: it is about this
+        # file, and whoever opens it should know what was not checked.
+        note = nyx.io.intan_unchecked_note(path) if format == "neo" else None
+        self.show_warnings([note] if note else [])
 
     def _build_preview(self, streams, channels) -> None:
         self.docks.clear()
@@ -516,6 +585,12 @@ class LoadTab(Tab):
 
         self.session.set_recording(recording, reference=reference)
 
+    def shutdown(self) -> None:
+        # A read still running would report into a tab being torn down.
+        self._reading_key = None
+        self._reader.wait()
+        super().shutdown()
+
     def refresh(self) -> None:
         try:
             recording = self.session.recording
@@ -557,6 +632,21 @@ def _channel(text: str):
     """A channel is an index or a name; digits mean an index."""
     text = text.strip()
     return int(text) if text.lstrip("-").isdigit() else text
+
+
+def _edf_backed(path: str, format: str, kwargs: dict) -> bool:
+    """Whether opening this means pyedflib, which must stay on one thread."""
+    if format == "edf":
+        return True
+    if format != "neo":
+        return False
+    return (kwargs.get("neo_format") or nyx.io.guess_neo_format(path)) == "EDF"
+
+
+def _open_every_stream(path: str, format: str, kwargs: dict):
+    """``(streams, channels)`` -- on a worker thread, so no Qt here."""
+    streams = nyx.io.recording_streams(path, format=format, **kwargs)
+    return streams, nyx.io.describe_channels(streams)
 
 
 def _label(channel, channels) -> str:

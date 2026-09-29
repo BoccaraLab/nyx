@@ -22,9 +22,19 @@ def load_tab(qtbot):
 
 
 def open_file(tab, path, format="auto"):
+    """Choose a file and wait for its channels, which are read on a worker."""
+    import time
+
+    from PySide6.QtWidgets import QApplication
+
     tab.format.setCurrentText(format)
     tab.path.setText(path)
     tab._offer_channels()
+    deadline = time.monotonic() + 15
+    while tab.reading() and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert not tab.reading(), "the channels were never read"
 
 
 def names(combo):
@@ -124,3 +134,55 @@ def test_an_npz_has_nothing_to_preview(load_tab, two_stream_edf, tmp_path):
 
     assert list(load_tab.docks.viewers) == ["what was loaded"]
     assert names(load_tab.eeg_channel) == ["eeg", "emg"]
+
+
+@pytest.fixture
+def si_folder(tmp_path):
+    """A recording read on the worker. EDF is not: see _edf_backed."""
+    from spikeinterface.core import NumpyRecording
+
+    folder = tmp_path / "saved"
+    NumpyRecording([np.zeros((500, 3), "float32")], 100.0).save(
+        folder=str(folder), verbose=False
+    )
+    return str(folder)
+
+
+def test_the_window_is_not_held_up_while_a_file_is_read(load_tab, si_folder):
+    load_tab.format.setCurrentText("auto")
+    load_tab.path.setText(si_folder)
+    load_tab._offer_channels()
+
+    # Back straight away, with a note, and the channels still to come.
+    assert load_tab.reading()
+    assert "Reading the channels" in load_tab.channel_note.text()
+
+
+def test_a_file_chosen_while_another_is_read_wins(load_tab, si_folder, tmp_path):
+    path = tmp_path / "r.npz"
+    np.savez(path, eeg=np.zeros(100), emg=np.zeros(100), fs=100.0)
+
+    load_tab.path.setText(si_folder)
+    load_tab._offer_channels()          # still reading this one...
+    open_file(load_tab, str(path))      # ...when this is chosen
+
+    assert names(load_tab.eeg_channel) == ["eeg", "emg"]
+
+
+def test_a_skipped_intan_check_is_said_on_screen(load_tab, two_stream_edf, monkeypatch):
+    note = "The timestamps of x.rhs were not checked for gaps."
+    monkeypatch.setattr(nyx.io, "intan_unchecked_note", lambda path: note)
+
+    open_file(load_tab, two_stream_edf, format="neo")
+
+    assert load_tab.warnings.isVisibleTo(load_tab)
+    assert note in load_tab.warnings._label.text()
+
+
+def test_an_edf_is_read_on_the_window_thread(load_tab, two_stream_edf):
+    """pyedflib is not safe to use from two threads."""
+    load_tab.format.setCurrentText("neo")
+    load_tab.path.setText(two_stream_edf)
+    load_tab._offer_channels()
+    assert not load_tab.reading()
+    assert load_tab.channel_table.table.rowCount() == 3

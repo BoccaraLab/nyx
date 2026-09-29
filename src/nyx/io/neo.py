@@ -21,12 +21,31 @@ the EMG from ``emg_stream_id`` when it lives in another one.
 Which channel is which is rarely obvious from a raw file, so
 :func:`recording_streams` and :func:`describe_channels` open every stream
 without choosing anything, for looking at before picking two channels.
+
+Intan
+-----
+
+Intan writes either one ``.rhs``/``.rhd`` file holding everything, or a folder
+with a small ``info.rhs``/``info.rhd`` beside ``.dat`` files ("one file per
+signal" or "per channel"). Pass the file, the folder, or any file in the
+folder; nyx opens it the way its layout needs.
+
+Neo checks on every open that an Intan recording's timestamps have no gaps.
+In the headerless layouts the timestamps are their own small ``time.dat`` and
+the check is quick, so it runs. In the single-file layout they are spread
+through the whole file, so checking them reads every byte -- minutes for a
+recording on a network share, before a single trace is shown. There the check
+is skipped, with a warning saying so; :func:`check_intan_timestamps` runs it
+when you want it.
 """
 
 from __future__ import annotations
 
 import inspect
 import os
+import threading
+import warnings
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cache
 
@@ -47,6 +66,9 @@ __all__ = [
     "open_neo",
     "recording_streams",
     "describe_channels",
+    "intan_layout",
+    "intan_unchecked_note",
+    "check_intan_timestamps",
 ]
 
 
@@ -149,10 +171,10 @@ def guess_neo_format(path: str) -> str | None:
     Only formats spikeinterface can read are returned: Neo recognises a few
     more that it cannot hand over as a recording.
     """
-    import warnings
-
     import neo.rawio
 
+    if _intan_info_file(path) is not None:
+        return "Intan"   # a headerless folder, which Neo does not recognise
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -182,13 +204,20 @@ def _path_kwargs(path: str, neo_format: str) -> dict:
     # A folder format given a file inside the folder: open the folder.
     if key == "folder_path" and os.path.isfile(path):
         path = os.path.dirname(path)
+    # Headerless Intan is opened through its info file, whichever file or
+    # folder was pointed at.
+    if neo_format == "Intan":
+        path = _intan_info_file(path) or path
     return {key: path}
 
 
 def neo_streams(path: str, neo_format: str | None = None) -> list[tuple[str, str]]:
     """``(stream_id, stream_name)`` for every stream in the file."""
     neo_format = _resolve_format(path, neo_format)
-    names, ids = _extractor(neo_format).get_streams(**_path_kwargs(path, neo_format))
+    with _intan_checks(path, neo_format):
+        names, ids = _extractor(neo_format).get_streams(
+            **_path_kwargs(path, neo_format)
+        )
     return [(str(i), str(n)) for i, n in zip(ids, names)]
 
 
@@ -197,9 +226,112 @@ def open_neo(path: str, neo_format: str | None = None, stream_id: str | None = N
     neo_format = _resolve_format(path, neo_format)
     if stream_id is None:
         stream_id = neo_streams(path, neo_format)[0][0]
-    return _extractor(neo_format)(
-        **_path_kwargs(path, neo_format), stream_id=str(stream_id)
+    with _intan_checks(path, neo_format):
+        return _extractor(neo_format)(
+            **_path_kwargs(path, neo_format), stream_id=str(stream_id)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Intan
+# ---------------------------------------------------------------------------
+
+_INTAN_INFO = ("info.rhs", "info.rhd")
+
+#: Held while Neo's Intan timestamp check is switched off, which is done on
+#: the class and so would otherwise leak into another thread's open.
+_intan_lock = threading.RLock()
+_warned_unchecked: set[str] = set()
+
+
+def _intan_info_file(path: str) -> str | None:
+    """The ``info.rhs``/``info.rhd`` of a headerless Intan recording, if it is one.
+
+    ``path`` may be the folder, the info file, or any file inside the folder.
+    """
+    folder = path if os.path.isdir(path) else os.path.dirname(path)
+    for name in _INTAN_INFO:
+        candidate = os.path.join(folder, name)
+        if os.path.isfile(candidate):
+            if os.path.isdir(path) or os.path.basename(path) == name:
+                return candidate
+            if os.path.splitext(path)[1].lower() == ".dat":
+                return candidate
+    return None
+
+
+def intan_layout(path: str) -> str | None:
+    """How an Intan recording is stored, ``None`` if ``path`` is not one.
+
+    ``"header-attached"`` is the single ``.rhs``/``.rhd`` file;
+    ``"one-file-per-signal"`` and ``"one-file-per-channel"`` are the folders
+    with an ``info`` file, in Neo's names for them.
+    """
+    info = _intan_info_file(path)
+    if info is not None:
+        folder = os.path.dirname(info)
+        per_signal = os.path.exists(os.path.join(folder, "amplifier.dat"))
+        return "one-file-per-signal" if per_signal else "one-file-per-channel"
+    if os.path.isfile(path) and os.path.splitext(path)[1].lower() in (".rhs", ".rhd"):
+        return "header-attached"
+    return None
+
+
+def intan_unchecked_note(path: str) -> str | None:
+    """What was skipped opening ``path``, or ``None`` if nothing was."""
+    if intan_layout(path) != "header-attached":
+        return None
+    return (
+        f"The timestamps of {os.path.basename(path)} were not checked for "
+        f"gaps. In Intan's single-file format that check reads the whole "
+        f"file -- minutes over a network -- so it is skipped; a corrupted or "
+        f"badly merged recording will not be caught when it is opened. "
+        f"nyx.io.neo.check_intan_timestamps(path) runs the check. Recording "
+        f"in Intan's 'one file per signal' format keeps it, and it is quick "
+        f"there."
     )
+
+
+@contextmanager
+def _intan_checks(path: str, neo_format: str):
+    """Open without Neo's timestamp check, for single-file Intan only."""
+    if neo_format != "Intan" or intan_layout(path) != "header-attached":
+        yield
+        return
+
+    from neo.rawio.intanrawio import IntanRawIO
+
+    with _intan_lock:
+        original = IntanRawIO._assert_timestamp_continuity
+        IntanRawIO._assert_timestamp_continuity = lambda self: None
+        try:
+            yield
+        finally:
+            IntanRawIO._assert_timestamp_continuity = original
+
+    # Once per file per session: a GUI opens a file several times while
+    # showing it, and one warning says it.
+    key = os.path.abspath(path)
+    if key not in _warned_unchecked:
+        _warned_unchecked.add(key)
+        warnings.warn(intan_unchecked_note(path), stacklevel=3)
+
+
+def check_intan_timestamps(path: str) -> bool:
+    """Whether an Intan recording's timestamps run without a gap.
+
+    The check Neo makes on opening, which nyx skips for single-file Intan
+    recordings because it reads the whole file. Slow on a large file, and
+    slower over a network.
+    """
+    from neo.rawio.intanrawio import IntanRawIO
+
+    with _intan_lock:
+        reader = IntanRawIO(
+            filename=_intan_info_file(path) or path, ignore_integrity_checks=True
+        )
+        reader.parse_header()
+    return not reader.discontinuous_timestamps
 
 
 @register_recording_reader("neo")

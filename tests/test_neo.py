@@ -113,3 +113,50 @@ def test_a_folder_spikeinterface_saved_is_still_spikeinterface(tmp_path):
         folder=str(folder), verbose=False
     )
     assert _infer_format(str(folder)) == "spikeinterface"
+
+
+# -- Intan layouts: no Intan files ship with the tests, so these are about
+#    telling the layouts apart, which is what decides whether the check runs.
+
+
+def test_a_single_intan_file_is_header_attached(tmp_path):
+    from nyx.io.neo import intan_layout, intan_unchecked_note
+
+    path = tmp_path / "recording_1.rhs"
+    path.write_bytes(b"")
+    assert intan_layout(str(path)) == "header-attached"
+    assert "not checked" in intan_unchecked_note(str(path))
+
+
+def test_a_headerless_intan_folder_is_found_from_any_of_its_files(tmp_path):
+    from nyx.io.neo import _intan_info_file, intan_layout, intan_unchecked_note
+
+    for name in ("info.rhs", "amplifier.dat", "time.dat"):
+        (tmp_path / name).write_bytes(b"")
+    info = str(tmp_path / "info.rhs")
+
+    for pointed_at in (tmp_path, tmp_path / "info.rhs", tmp_path / "amplifier.dat"):
+        assert _intan_info_file(str(pointed_at)) == info
+        assert intan_layout(str(pointed_at)) == "one-file-per-signal"
+    assert intan_unchecked_note(info) is None       # its check still runs
+    assert guess_neo_format(str(tmp_path)) == "Intan"
+
+
+def test_other_files_are_not_intan(two_stream_edf):
+    from nyx.io.neo import intan_layout
+
+    assert intan_layout(two_stream_edf) is None
+
+
+def test_the_check_is_only_ever_switched_off_for_the_open(tmp_path):
+    from neo.rawio.intanrawio import IntanRawIO
+
+    from nyx.io.neo import _intan_checks
+
+    path = tmp_path / "recording_1.rhs"
+    path.write_bytes(b"")
+    original = IntanRawIO._assert_timestamp_continuity
+    with pytest.warns(UserWarning, match="not checked"):
+        with _intan_checks(str(path), "Intan"):
+            assert IntanRawIO._assert_timestamp_continuity is not original
+    assert IntanRawIO._assert_timestamp_continuity is original
