@@ -36,7 +36,7 @@ from nyx.gui.jobs import JobRunner
 from nyx.gui.session import ScoringSession, Stage
 from nyx.gui.widgets import LogPane, StageBadge, State
 
-__all__ = ["MainWindow", "tab_classes"]
+__all__ = ["MainWindow", "tab_classes", "manual_tab_classes"]
 
 
 def tab_classes() -> list:
@@ -48,6 +48,15 @@ def tab_classes() -> list:
     from nyx.gui.tabs.sleep import SleepTab
 
     return [LoadTab, SignalTab, EmgTab, SleepTab, ResultTab]
+
+
+def manual_tab_classes() -> list:
+    """The tabs of ``nyx-manual``: the same start, then scoring by hand."""
+    from nyx.gui.tabs.load import LoadTab
+    from nyx.gui.tabs.manual import ManualTab
+    from nyx.gui.tabs.signal import SignalTab
+
+    return [LoadTab, SignalTab, ManualTab]
 
 
 class _RailRow(QWidget):
@@ -72,9 +81,12 @@ class MainWindow(QMainWindow):
 
     session_changed = Signal(int)
 
-    def __init__(self, session: ScoringSession | None = None, parent=None):
+    def __init__(self, session: ScoringSession | None = None, parent=None,
+                 *, tabs=None, title: str = "nyx"):
         super().__init__(parent)
-        self.setWindowTitle("nyx")
+        self.setWindowTitle(title)
+        #: The tab classes, in order. ``nyx-manual`` passes its own.
+        self._tab_classes = tabs
         self.resize(1400, 900)
 
         from nyx.gui import branding
@@ -116,7 +128,7 @@ class MainWindow(QMainWindow):
 
         self.tabs = []
         self._rows = []
-        for number, factory in enumerate(tab_classes(), start=1):
+        for number, factory in enumerate(self._tab_classes or tab_classes(), start=1):
             tab = factory(self.session)
             tab.run_requested.connect(self._run_stage)
             tab.status.connect(self.status)
@@ -349,6 +361,14 @@ class MainWindow(QMainWindow):
                 "It cannot be stopped, but its result will be discarded.",
             )
             if answer is not QMessageBox.Yes:
+                event.ignore()
+                return
+
+        # Work only a tab holds -- a manual scoring not yet saved -- is asked
+        # about before anything is torn down.
+        for tab in self.tabs:
+            confirm = getattr(tab, "confirm_close", None)
+            if confirm is not None and not confirm():
                 event.ignore()
                 return
 

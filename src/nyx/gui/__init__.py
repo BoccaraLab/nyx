@@ -30,7 +30,7 @@ from __future__ import annotations
 import os
 import sys
 
-__all__ = ["main", "run"]
+__all__ = ["main", "main_manual", "run"]
 
 #: Qt bindings that would be picked up if we did not choose one. PyQt5 and
 #: PySide6 in a single process is a segfault, not an ImportError, so the choice
@@ -60,14 +60,17 @@ def _missing_dependency(exc: Exception) -> str:
     )
 
 
-def _parser():
+def _parser(manual: bool = False):
     import argparse
 
     import nyx
 
     parser = argparse.ArgumentParser(
-        prog="nyx-gui",
+        prog="nyx-manual" if manual else "nyx-gui",
         description=(
+            "Score a sleep recording by hand, one fixed-length epoch at a "
+            "time, after the same recording and signal check as nyx-gui."
+            if manual else
             "Score a sleep recording: one window, one tab per decision. "
             "Runs the same pipeline as the example notebooks."
         ),
@@ -104,14 +107,17 @@ def _parser():
     return parser
 
 
-def run(argv: list[str] | None = None) -> int:
+def run(argv: list[str] | None = None, *, manual: bool = False) -> int:
     """Open the GUI and run it until the window closes.
+
+    ``manual`` opens ``nyx-manual`` instead: the Recording and Signal check
+    tabs, then scoring by hand.
 
     Returns the Qt exit code. Importing this module does *not* import Qt --
     that happens here, after the binding is pinned, so ``--help`` and
     ``--version`` work even without the GUI extras installed.
     """
-    arguments = _parser().parse_args(argv)
+    arguments = _parser(manual).parse_args(argv)
 
     _pin_qt_binding()
 
@@ -143,7 +149,12 @@ def run(argv: list[str] | None = None) -> int:
 
         session = ScoringSession.from_config(nyx.load_config(arguments.config))
 
-    window = MainWindow(session)
+    if manual:
+        from nyx.gui.mainwindow import manual_tab_classes
+
+        window = MainWindow(session, tabs=manual_tab_classes(), title="nyx -- manual")
+    else:
+        window = MainWindow(session)
 
     if arguments.params:
         window.tabs[0].preset.setCurrentText(arguments.params)
@@ -164,3 +175,8 @@ def run(argv: list[str] | None = None) -> int:
 def main() -> int:
     """Console entry point for ``nyx-gui``."""
     return run()
+
+
+def main_manual() -> int:
+    """Console entry point for ``nyx-manual``."""
+    return run(manual=True)

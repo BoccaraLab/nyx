@@ -83,6 +83,8 @@ dev-gui = [
 # Not gui-scripts: nyx prints as it runs, and on Windows gui-scripts detaches
 # the console, so a failure would leave nothing to read.
 nyx-gui = "nyx.gui:main"
+# Scoring by hand, in whole epochs, after the same recording and signal check.
+nyx-manual = "nyx.gui:main_manual"
 # ephyviewer's standalone viewer. Its own `ephyviewer` command is broken in
 # 1.8.0 (missing __version__); see nyx/gui/standalone.py.
 nyx-ephyviewer = "nyx.gui.standalone:main"

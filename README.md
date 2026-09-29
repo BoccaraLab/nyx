@@ -254,6 +254,37 @@ nyx-ephyviewer session/ -f OpenEphysBinary   # say the format when it can't be g
 
 Neither converts or writes anything, so both are safe on the original data.
 
+## Scoring by hand
+
+```bash
+nyx-manual            # or: nyx-manual recording.edf
+```
+
+The same start as `nyx-gui` — pick the recording and its EEG and EMG, then
+notch and trim on the Signal check tab — and then a **Manual scoring** tab
+instead of the automatic pipeline: the traces, their wavelet views, and a
+hypnogram you fill in yourself.
+
+- **Choose the epoch length** (4 s by default). From then on every epoch is
+  exactly that long and sits on that grid: a stage key scores the epoch under
+  the cursor and moves to the next, a selected range is widened to whole
+  epochs, and anything that could not be snapped — typing a start or a
+  duration, splitting between grid lines, overlapping stages — is refused. The
+  grid starts at the start of the recording, so trimming the window does not
+  move it.
+- **Keys** 1, 2, 3… are the stages in the order listed (NOSIGNAL, UNCLASSIFIED,
+  WAKE, REM, NREM by default); `alt`+arrows jump between changes of stage.
+- **Save** writes `time,duration,label` in seconds from the start of the
+  recording — only what you scored. **Continue a scoring…** opens one to carry
+  on; a scoring made at another epoch length is put on this grid by majority.
+- **Compare** — if you loaded a manual scoring on the Recording tab, it stays
+  hidden while you score. Press Compare to see it alongside yours, read-only,
+  with the agreement over the epochs you scored: for training on recordings
+  someone has already scored.
+
+The grid is the manual scorer's alone: correcting an automatic scoring in
+`nyx-gui` still lets you move boundaries freely.
+
 ---
 
 ## Look at the signal first
