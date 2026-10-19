@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 import nyx
+from nyx.gui.jobs import busy_cursor
 from nyx.gui.panels import MplPanel, TextPanel
 from nyx.gui.session import Stage
 from nyx.gui.sources import autoscale, trace_sources
@@ -369,7 +370,10 @@ class SignalTab(Tab):
             return
 
         self.status.emit("Measuring...")
-        self._check = nyx.check_signals(recording, preview=self.preview.value() or None)
+        with busy_cursor():
+            self._check = nyx.check_signals(
+                recording, preview=self.preview.value() or None
+            )
         self.summary.set_text(self._check.summary())
         self.spectra.set_figure(self._check.plot())
 
@@ -388,15 +392,18 @@ class SignalTab(Tab):
 
     def _window_from_view(self) -> None:
         """Read the window off whatever the traces are showing."""
-        toolbar = self.docks.navigation_toolbar
-        centre = float(toolbar.t)
-        width = float(getattr(toolbar, "xsize", 0.0) or 0.0)
+        cursor = float(self.docks.navigation_toolbar.t)
+        width = self.docks.xsize()
         if width <= 0:
             self.status.emit("Scroll the traces to the stretch you want first.")
             return
+        # The cursor is not the middle of the view: ephyviewer draws it
+        # xratio of the way across, a third by default.
+        trace = self.docks.panel("EEG")
+        ratio = float(trace.params["xratio"]) if trace is not None else 0.5
         self.whole.setChecked(False)
-        self.start.setValue(max(0.0, centre - width / 2))
-        self.end.setValue(centre + width / 2)
+        self.start.setValue(max(0.0, cursor - ratio * width))
+        self.end.setValue(cursor + (1.0 - ratio) * width)
         self.status.emit(
             f"Window set to {self.start.value():.0f}-{self.end.value():.0f} s."
         )

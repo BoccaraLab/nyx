@@ -274,9 +274,6 @@ class ManualTab(Tab):
         )
         try:
             viewer.params["colormap"] = self.palette.currentText()
-            # The dock already says which channel it is; the "0: EEG" title
-            # over the image only takes height from it.
-            viewer.params["display_labels"] = False
         except Exception:  # noqa: BLE001
             pass
         return viewer

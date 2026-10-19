@@ -951,11 +951,20 @@ def make_timefreq_viewer(source, name: str, params: dict, channel: str,
     """
     if scalogram:
         viewer = NyxTimeFreqViewer(source=source, name=name)
-        viewer.apply_settings(timefreq_params_from(params, channel))
-        return viewer
+        settings = timefreq_params_from(params, channel)
+    else:
+        viewer = NyxSpectrogramViewer(source=source, name=name)
+        settings = spectrogram_params_from(params, channel)
 
-    viewer = NyxSpectrogramViewer(source=source, name=name)
-    viewer.apply_settings(spectrogram_params_from(params, channel))
+    # The dock already says which channel it is; the "0: EEG" title over the
+    # image only takes height from it. Silenced, because apply_settings
+    # rebuilds the plots once anyway.
+    blocked = viewer.params.blockSignals(True)
+    try:
+        viewer.params["display_labels"] = False
+    finally:
+        viewer.params.blockSignals(blocked)
+    viewer.apply_settings(settings)
     return viewer
 
 

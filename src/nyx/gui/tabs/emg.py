@@ -173,8 +173,9 @@ class EmgTab(Tab):
         _eeg, emg_trace, offset = trace_sources(self.session.windowed())
 
         # Top to bottom, this is the decision being made, in order: the
-        # signal, the power it is summarised into, the distribution of that
-        # power with the cut on it, and the bouts that fall out of the cut.
+        # signal, the power it is summarised into, and the bouts that fall
+        # out of the cut. The distribution of the power sits beside it, with
+        # the cut on both.
         if emg_trace is not None:
             self.docks.add(autoscale(TraceViewer(source=emg_trace, name="EMG")))
 
@@ -188,7 +189,8 @@ class EmgTab(Tab):
 
         self.histogram = HistogramViewer(name="EMG distribution")
         self.histogram.set_values(emg.power, "EMG power (scaled)")
-        self.docks.add(self.histogram)
+        self.docks.add(self.histogram, split_with="EMG power",
+                       orientation="horizontal")
 
         if self.session.has(Stage.WAKE_SLEEP):
             self.docks.add(self._encoder(offset))
@@ -205,13 +207,18 @@ class EmgTab(Tab):
         self.histogram.attach(self._lines)
         self._lines.add(self.power.plot, "h")
 
-        # The traces are read along, the distribution across; give the traces
-        # the height and leave the distribution enough to see the valley in.
-        names = ["EMG", "EMG power", "EMG distribution", "wake / sleep"]
+        # The traces are read along, the distribution across: the traces get
+        # the width, and the distribution enough of it to see the valley in.
+        names = ["EMG", "EMG power", "wake / sleep"]
         docks = [self.docks.viewers[n]["dock"]
                  for n in names if n in self.docks.viewers]
-        sizes = [300, 260, 220, 160][: len(docks)]
+        sizes = [250, 350, 150][: len(docks)]
         self.docks.resizeDocks(docks, sizes, Qt.Vertical)
+        # In pixels, not a ratio: Qt reads [3, 1] as three pixels and one.
+        self.docks.resizeDocks(
+            [self.docks.viewers[n]["dock"] for n in ("EMG power", "EMG distribution")],
+            [900, 300], Qt.Horizontal,
+        )
 
     def _encoder(self, offset: float):
         """The wake/sleep bouts, editable, in nyx's stage colours.
@@ -319,8 +326,8 @@ class EmgTab(Tab):
         _eeg, _emg, offset = trace_sources(self.session.windowed())
         panel = self.docks.panel("wake / sleep")
         if panel is None:
-            self.docks.add(self._encoder(offset), split_with="EMG power",
-                           orientation="vertical")
+            # Along the bottom, under the power and its distribution both.
+            self.docks.add(self._encoder(offset))
         else:
             from nyx.gui.hypnogram import to_epoch_dict
 

@@ -447,6 +447,51 @@ def test_the_histogram_can_be_resized(scored_window):
     assert histogram.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
 
 
+def test_the_histogram_shows_every_bin(scored_window):
+    """The tall bins were cut off at the top."""
+    import numpy as np
+
+    tab = tab_named(scored_window, "EMG threshold")
+    _x, heights = tab.histogram.curve.getData()
+    low, high = tab.histogram.plot.viewRange()[1]
+
+    assert low <= np.min(heights) and np.max(heights) <= high
+
+
+def test_a_panel_added_later_opens_at_the_width_the_others_show(scored_window):
+    """The reference, shown after the width was changed, opened at
+    ephyviewer's default width instead."""
+    tab = tab_named(scored_window, "Result")
+    tab.show_reference.setChecked(False)
+    tab.docks.navigation_toolbar.spinbox_xsize.setValue(120.0)
+
+    tab.show_reference.setChecked(True)
+
+    assert tab.docks.panel("reference").params["xsize"] == pytest.approx(120.0)
+
+
+def test_the_window_can_be_taken_from_the_view(scored_window):
+    tab = tab_named(scored_window, "Signal check")
+    tab.docks.navigation_toolbar.spinbox_xsize.setValue(300.0)
+    tab.docks.seek(1000.0)
+
+    tab._window_from_view()
+
+    # What the traces show: the cursor is xratio of the way across, not in
+    # the middle.
+    ratio = tab.docks.panel("EEG").params["xratio"]
+    assert not tab.whole.isChecked()
+    assert tab.start.value() == pytest.approx(1000.0 - ratio * 300.0)
+    assert tab.end.value() == pytest.approx(1000.0 + (1 - ratio) * 300.0)
+
+
+def test_the_spectrograms_have_no_title_over_the_image(scored_window):
+    tab = tab_named(scored_window, "Signal check")
+
+    for name in ("EEG spectrum", "EMG spectrum"):
+        assert tab.docks.panel(name).params["display_labels"] is False
+
+
 def recluster(window, tab, qtbot, n):
     """Press Recluster the way a person does, and wait for the worker."""
     tab.clustering.set_values({"method": "kmeans", "n_clusters": n})

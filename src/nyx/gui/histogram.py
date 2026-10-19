@@ -102,20 +102,16 @@ class ThresholdLines:
 
 
 class HistogramViewer(_Dockable):
-    """The distribution a threshold is chosen on, with the threshold on it.
-
-    Log counts by default: the wake mode of an EMG power distribution is often
-    a hundredth the height of the sleep mode, and on a linear axis the valley
-    between them -- the thing you are trying to put the line in -- is invisible.
-    """
+    """The distribution a threshold is chosen on, with the threshold on it."""
 
     thresholds_changed = Signal(list)
 
     def __init__(self, name: str = "distribution", parent=None,
-                 bins: int = 120, log: bool = True):
+                 bins: int = 120):
         super().__init__(name, parent)
         self.bins = int(bins)
         self._values = np.array([])
+        self._ranges: dict[str, tuple[float, float]] = {}
 
         from PySide6.QtWidgets import QSizePolicy, QVBoxLayout
 
@@ -132,13 +128,15 @@ class HistogramViewer(_Dockable):
         self.plot.showGrid(x=True, y=True, alpha=0.3)
         self.plot.setLabel("bottom", "value")
         self.plot.setLabel("left", "epochs")
-        self.plot.setLogMode(False, log)
+        # 0.2, not 200 with a "x0.001" tucked into the label.
+        self.plot.getAxis("bottom").enableAutoSIPrefix(False)
         layout.addWidget(self.graphics)
 
         # stepMode is passed with the data, not here: it requires one more x
         # than y, which an empty curve cannot satisfy.
         self.curve = pg.PlotCurveItem(
-            fillLevel=0, brush=pg.mkBrush("#7f8c9a80"), pen=pg.mkPen("#5a6570")
+            fillLevel=0, brush=pg.mkBrush("#7f8c9a80"),
+            pen=pg.mkPen("#5a6570"),
         )
         self.plot.addItem(self.curve)
         self.thresholds: ThresholdLines | None = None
@@ -153,12 +151,15 @@ class HistogramViewer(_Dockable):
             return
 
         counts, edges = np.histogram(finite, bins=self.bins)
-        # A log axis cannot show an empty bin, and the tails of an EMG power
-        # distribution are full of them.
-        self.curve.setData(edges, np.maximum(counts, 0.5), stepMode="center")
+        self.curve.setData(edges, counts, stepMode="center")
         if label:
             self.plot.setLabel("bottom", label)
-        self.plot.setXRange(float(edges[0]), float(edges[-1]), padding=0.02)
+
+        self._ranges = {
+            "count": (0.0, 1.05 * float(counts.max())),
+            "value": (float(edges[0]), float(edges[-1])),
+        }
+        self.auto_scale()
 
     def attach(self, thresholds: ThresholdLines) -> ThresholdLines:
         """Draw a set of thresholds here, vertically."""
@@ -166,4 +167,8 @@ class HistogramViewer(_Dockable):
         return thresholds
 
     def auto_scale(self) -> None:
-        self.plot.enableAutoRange()
+        """Show every bin, the tallest included."""
+        if not self._ranges:
+            return
+        self.plot.setYRange(*self._ranges["count"], padding=0.0)
+        self.plot.setXRange(*self._ranges["value"], padding=0.02)

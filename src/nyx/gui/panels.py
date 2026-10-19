@@ -133,6 +133,11 @@ class DockHost(MainViewer):
         self.setWindowFlags(Qt.Widget)
         # The navigation bar's play and stop, before any panel is added.
         brighten_icons(self)
+        self._xsize_chosen = False
+        self.navigation_toolbar.xsize_changed.connect(self._choose_xsize)
+
+    def _choose_xsize(self, _xsize: float) -> None:
+        self._xsize_chosen = True
 
     # -- contents ----------------------------------------------------------
 
@@ -144,6 +149,14 @@ class DockHost(MainViewer):
         if preferred and not {"location", "tabify_with", "split_with"} & set(kwargs):
             kwargs["location"] = preferred
         self.add_view(widget, **kwargs)
+        # ephyviewer only tells the views about the time width when it
+        # changes, so one added later -- the reference, the bouts -- opened at
+        # its own default width and position instead of the others'. Only
+        # once a width has been chosen: before that the toolbar's 3 s is not
+        # what anything shows, and a spectrogram 3 s wide is one column.
+        if self._xsize_chosen and hasattr(widget, "set_xsize"):
+            widget.set_xsize(self.xsize())
+        widget.seek(float(self.navigation_toolbar.t))
         # A panel that was removed had close() called on it, which hides it as
         # well as stopping its threads. Re-adding the same object has to undo
         # that or the dock comes back empty.
@@ -173,6 +186,11 @@ class DockHost(MainViewer):
     def panel(self, name: str):
         entry = self.viewers.get(name)
         return entry["widget"] if entry else None
+
+    def xsize(self) -> float:
+        """The time width the views are showing, in seconds; 0 if unknown."""
+        spinbox = getattr(self.navigation_toolbar, "spinbox_xsize", None)
+        return float(spinbox.value()) if spinbox is not None else 0.0
 
     def closeEvent(self, event):  # noqa: N802 - Qt's spelling
         try:

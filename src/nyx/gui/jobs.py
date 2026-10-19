@@ -37,11 +37,48 @@ from __future__ import annotations
 import traceback
 import warnings
 from collections.abc import Callable
+from contextlib import contextmanager
 from typing import Any
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
 
-__all__ = ["Job", "JobSignals", "JobRunner"]
+__all__ = ["Job", "JobSignals", "JobRunner", "busy_cursor"]
+
+
+def _set_cursor(shape) -> bool:
+    """Override the application's cursor; False without an application."""
+    from PySide6.QtGui import QGuiApplication
+
+    if QGuiApplication.instance() is None:
+        return False
+    QGuiApplication.setOverrideCursor(shape)
+    return True
+
+
+def _restore_cursor() -> None:
+    from PySide6.QtGui import QGuiApplication
+
+    if QGuiApplication.instance() is not None:
+        QGuiApplication.restoreOverrideCursor()
+
+
+@contextmanager
+def busy_cursor():
+    """The hourglass, for work done on the UI thread.
+
+    The window cannot repaint while it runs, so without this a long Measure
+    looks like a click that did nothing.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    set_ = _set_cursor(Qt.WaitCursor)
+    if set_:
+        QApplication.processEvents()   # show it before the work starts
+    try:
+        yield
+    finally:
+        if set_:
+            _restore_cursor()
 
 
 class JobSignals(QObject):
@@ -129,6 +166,18 @@ class JobRunner(QObject):
         # One at a time: concurrent jobs would race on the session.
         self._pool.setMaxThreadCount(1)
         self._running = 0
+        self._cursor = False
+        # The arrow with a spinning circle while anything runs: the window
+        # stays usable, but computing the EMG features or the PCA otherwise
+        # looks like nothing happening.
+        self.busy_changed.connect(self._show_busy)
+
+    def _show_busy(self, busy: bool) -> None:
+        if busy and not self._cursor:
+            self._cursor = _set_cursor(Qt.BusyCursor)
+        elif not busy and self._cursor:
+            _restore_cursor()
+            self._cursor = False
 
     def submit(
         self, fn: Callable[..., Any], *args, description: str = "",

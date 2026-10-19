@@ -27,6 +27,23 @@ def test_a_job_runs_somewhere_that_is_not_the_ui_thread(runner, qtbot):
     assert where["thread"] != here
 
 
+def test_the_cursor_shows_work_is_going_on(runner, qtbot):
+    """Computing the EMG features or the PCA otherwise looks like nothing."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QGuiApplication
+
+    release = threading.Event()
+    with qtbot.waitSignal(runner.busy_changed, timeout=5000):
+        runner.submit(release.wait)
+
+    cursor = QGuiApplication.overrideCursor()
+    assert cursor is not None and cursor.shape() == Qt.BusyCursor
+
+    with qtbot.waitSignal(runner.done, timeout=5000):
+        release.set()
+    assert QGuiApplication.overrideCursor() is None
+
+
 def test_finished_carries_what_the_callable_returned(runner, qtbot):
     with qtbot.waitSignal(runner.finished, timeout=5000) as caught:
         runner.submit(lambda: 6 * 7, generation=3)
