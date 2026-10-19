@@ -170,17 +170,18 @@ def _read_edf(path: str, eeg_channel: ChannelSpec, emg_channel: ChannelSpec, **k
     read the EMG from a different stream; the two rates are then carried
     separately.
     """
+    from nyx.io.neo import _edf_lock, open_neo
+
     errors: list[str] = []
     stream_id = str(kwargs.get("stream_id", "0"))
     emg_stream_id = kwargs.get("emg_stream_id")
 
-    # 1. spikeinterface (keeps the data lazy on disk)
+    # 1. spikeinterface (keeps the data lazy on disk). Through open_neo, which
+    #    makes reads from several threads take turns -- see nyx.io.neo.
     try:
-        import spikeinterface.extractors as se
-
-        rec = se.read_edf(path, stream_id=stream_id)
+        rec = open_neo(path, "EDF", stream_id)
         if emg_stream_id is not None and str(emg_stream_id) != stream_id:
-            emg_rec = se.read_edf(path, stream_id=str(emg_stream_id))
+            emg_rec = open_neo(path, "EDF", str(emg_stream_id))
             eeg = rec.select_channels([_resolve_channel(rec, eeg_channel)])
             emg = emg_rec.select_channels([_resolve_channel(emg_rec, emg_channel)])
             return (
@@ -197,18 +198,21 @@ def _read_edf(path: str, eeg_channel: ChannelSpec, emg_channel: ChannelSpec, **k
     try:
         import pyedflib
 
-        reader = pyedflib.EdfReader(path)
-        try:
-            names = [reader.getLabel(i) for i in range(reader.signals_in_file)]
-            eeg_idx = _resolve_index_by_name(eeg_channel, names, "EEG")
-            fs = float(reader.getSampleFrequency(eeg_idx))
-            eeg = _as_single_channel(reader.readSignal(eeg_idx), fs, names[eeg_idx])
-            emg = None
-            if emg_channel is not None:
-                emg_idx = _resolve_index_by_name(emg_channel, names, "EMG")
-                emg = _as_single_channel(reader.readSignal(emg_idx), fs, names[emg_idx])
-        finally:
-            reader.close()
+        with _edf_lock:
+            reader = pyedflib.EdfReader(path)
+            try:
+                names = [reader.getLabel(i) for i in range(reader.signals_in_file)]
+                eeg_idx = _resolve_index_by_name(eeg_channel, names, "EEG")
+                fs = float(reader.getSampleFrequency(eeg_idx))
+                eeg = _as_single_channel(reader.readSignal(eeg_idx), fs, names[eeg_idx])
+                emg = None
+                if emg_channel is not None:
+                    emg_idx = _resolve_index_by_name(emg_channel, names, "EMG")
+                    emg = _as_single_channel(
+                        reader.readSignal(emg_idx), fs, names[emg_idx]
+                    )
+            finally:
+                reader.close()
         return eeg, emg, fs
     except Exception as exc:  # noqa: BLE001
         errors.append(f"pyedflib: {exc}")
@@ -376,24 +380,25 @@ def _list_edf_channels(path: str, **kwargs) -> list[str]:
     Nothing here loads sample data -- MNE is asked for ``preload=False``, which
     is the difference between reading a header and reading a night.
     """
+    from nyx.io.neo import _edf_lock, open_neo
+
     errors: list[str] = []
     stream_id = str(kwargs.get("stream_id", "0"))
 
     try:
-        import spikeinterface.extractors as se
-
-        return [str(c) for c in se.read_edf(path, stream_id=stream_id).get_channel_ids()]
+        return [str(c) for c in open_neo(path, "EDF", stream_id).get_channel_ids()]
     except Exception as exc:  # noqa: BLE001 - try the next reader
         errors.append(f"spikeinterface: {exc}")
 
     try:
         import pyedflib
 
-        reader = pyedflib.EdfReader(path)
-        try:
-            return [reader.getLabel(i) for i in range(reader.signals_in_file)]
-        finally:
-            reader.close()
+        with _edf_lock:
+            reader = pyedflib.EdfReader(path)
+            try:
+                return [reader.getLabel(i) for i in range(reader.signals_in_file)]
+            finally:
+                reader.close()
     except Exception as exc:  # noqa: BLE001
         errors.append(f"pyedflib: {exc}")
 

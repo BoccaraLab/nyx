@@ -214,7 +214,7 @@ def _path_kwargs(path: str, neo_format: str) -> dict:
 def neo_streams(path: str, neo_format: str | None = None) -> list[tuple[str, str]]:
     """``(stream_id, stream_name)`` for every stream in the file."""
     neo_format = _resolve_format(path, neo_format)
-    with _intan_checks(path, neo_format):
+    with _intan_checks(path, neo_format), _edf_serialised(neo_format):
         names, ids = _extractor(neo_format).get_streams(
             **_path_kwargs(path, neo_format)
         )
@@ -226,10 +226,52 @@ def open_neo(path: str, neo_format: str | None = None, stream_id: str | None = N
     neo_format = _resolve_format(path, neo_format)
     if stream_id is None:
         stream_id = neo_streams(path, neo_format)[0][0]
-    with _intan_checks(path, neo_format):
-        return _extractor(neo_format)(
+    with _intan_checks(path, neo_format), _edf_serialised(neo_format):
+        rec = _extractor(neo_format)(
             **_path_kwargs(path, neo_format), stream_id=str(stream_id)
         )
+    if neo_format == "EDF":
+        _serialise_edf_reads(rec)
+    return rec
+
+
+# ---------------------------------------------------------------------------
+# EDF
+# ---------------------------------------------------------------------------
+
+#: Held around every EDF open and every chunk read. Neo's EDF reader opens the
+#: file for each chunk and closes it after, and pyedflib refuses to open a
+#: file that is open anywhere else in the process. So two threads reading at
+#: once -- a trace on the GUI thread and the spectrogram workers beside it --
+#: fail with "file has already been opened", or worse, one closes the file
+#: under the other's read and it comes back short.
+_edf_lock = threading.RLock()
+
+
+@contextmanager
+def _edf_serialised(neo_format: str):
+    """Hold the EDF lock, for EDF only: reading the header opens the file too."""
+    if neo_format != "EDF":
+        yield
+        return
+    with _edf_lock:
+        yield
+
+
+def _serialise_edf_reads(rec) -> None:
+    """Make each chunk read of an EDF recording wait for any other to finish.
+
+    On the reader instance, so every recording derived from this one --
+    sliced, filtered, one channel selected -- reads through the lock too.
+    """
+    reader = rec.neo_reader
+    read = reader._get_analogsignal_chunk
+
+    def locked(*args, **kwargs):
+        with _edf_lock:
+            return read(*args, **kwargs)
+
+    reader._get_analogsignal_chunk = locked
 
 
 # ---------------------------------------------------------------------------

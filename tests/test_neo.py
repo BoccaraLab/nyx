@@ -36,6 +36,30 @@ def test_a_file_neo_does_not_know_is_not_guessed(tmp_path):
     assert guess_neo_format(str(path)) is None
 
 
+def test_edf_reads_take_turns(two_stream_edf):
+    """Neo opens an EDF for every chunk, and pyedflib refuses a second open of
+    the same file -- so a trace and its spectrogram worker reading at once
+    failed with "file has already been opened". A read waits for the lock."""
+    import threading
+
+    from nyx.io.neo import _edf_lock
+
+    recording = nyx.read_recording(two_stream_edf, eeg_channel="EEG1",
+                                   emg_channel="EEG2")
+    done = threading.Event()
+
+    def read():
+        recording.eeg.get_traces(start_frame=0, end_frame=256)
+        done.set()
+
+    with _edf_lock:
+        reader = threading.Thread(target=read)
+        reader.start()
+        assert not done.wait(0.3), "the read went ahead without the lock"
+    assert done.wait(10.0)
+    reader.join()
+
+
 def test_every_stream_is_found(two_stream_edf):
     assert [stream_id for stream_id, _name in neo_streams(two_stream_edf)] == ["0", "1"]
 
