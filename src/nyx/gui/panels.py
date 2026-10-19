@@ -151,12 +151,13 @@ class DockHost(MainViewer):
         self.add_view(widget, **kwargs)
         # ephyviewer only tells the views about the time width when it
         # changes, so one added later -- the reference, the bouts -- opened at
-        # its own default width and position instead of the others'. Only
-        # once a width has been chosen: before that the toolbar's 3 s is not
-        # what anything shows, and a spectrogram 3 s wide is one column.
+        # its own default width instead of the others'. Only once a width has
+        # been chosen: before that the toolbar's 3 s is not what anything
+        # shows, and a spectrogram 3 s wide is one column. (No seek: add_view
+        # has just seeked every view, and another would only be one more
+        # request to the spectrogram workers.)
         if self._xsize_chosen and hasattr(widget, "set_xsize"):
             widget.set_xsize(self.xsize())
-        widget.seek(float(self.navigation_toolbar.t))
         # A panel that was removed had close() called on it, which hides it as
         # well as stopping its threads. Re-adding the same object has to undo
         # that or the dock comes back empty.

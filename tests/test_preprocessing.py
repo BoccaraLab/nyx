@@ -78,18 +78,10 @@ def test_notch_leaves_neighbouring_frequencies_alone(humming):
 
 
 def test_notch_does_not_warn_about_spikeinterface_chunking(humming):
-    """spikeinterface warns that a notch's margin is large next to its 1 s job
-    chunk -- advice for its chunked writers, which nyx never uses."""
+    """spikeinterface warns that a notch's margin is large next to its job
+    chunk -- advice for its chunked writers, which nyx never uses. Whether it
+    warns at all depends on its version and the sampling rate."""
     import warnings
-
-    import spikeinterface.preprocessing as spre
-
-    with warnings.catch_warnings(record=True) as direct:
-        warnings.simplefilter("always")
-        spre.notch_filter(humming.emg, freq=50.0, q=30.0)
-    assert any("margin size" in str(w.message) for w in direct), (
-        "spikeinterface no longer warns here; this test can go"
-    )
 
     with warnings.catch_warnings(record=True) as through_nyx:
         warnings.simplefilter("always")
