@@ -148,7 +148,14 @@ def preprocess_channel(rec, settings: dict):
                 if rate == current:
                     continue
 
-            rec = function(rec, **kwargs)
+            with warnings.catch_warnings():
+                # spikeinterface's filters warn when their margin is over a
+                # fifth of its job chunk, 1 s by default -- so any notch on a
+                # recording sampled at a few hundred Hz. That is advice for
+                # its chunked writers, which nyx never uses: it reads traces
+                # directly.
+                warnings.filterwarnings("ignore", message="The margin size")
+                rec = function(rec, **kwargs)
 
     return rec
 
