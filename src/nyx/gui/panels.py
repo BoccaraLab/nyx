@@ -134,6 +134,7 @@ class DockHost(MainViewer):
         # The navigation bar's play and stop, before any panel is added.
         brighten_icons(self)
         self._xsize_chosen = False
+        self._removed: list = []
         self.navigation_toolbar.xsize_changed.connect(self._choose_xsize)
 
     def _choose_xsize(self, _xsize: float) -> None:
@@ -172,12 +173,13 @@ class DockHost(MainViewer):
             return
         entry["widget"].close()
         self.removeDockWidget(entry["dock"])
-        # hide() before setParent(None): an unparented visible widget is a
-        # top-level window, and it shows itself in the gap before deleteLater
-        # runs. That is where the flurry of windows came from.
+        # Kept, hidden, rather than deleted: deleting a panel mid-session has
+        # Qt free pyqtgraph objects Python still holds, and the next object
+        # Qt puts at one of their addresses comes back to Python as the old
+        # one -- a segfault, an abort or a type error, somewhere else, later.
+        # They go with the dock area, when the window closes.
         entry["dock"].hide()
-        entry["dock"].setParent(None)
-        entry["dock"].deleteLater()
+        self._removed.append(entry["dock"])
 
     def clear(self) -> None:
         """Close every panel. Called before rebuilding from new data."""
