@@ -39,7 +39,6 @@ import scipy.signal
 import scipy.stats
 from ephyviewer.myqt import QT
 from ephyviewer.spectrogramviewer import SpectrogramViewer, SpectrogramWorker
-from PySide6.QtCore import QObject, Qt, Slot
 from ephyviewer.spectrogramviewer import (
     default_params as upstream_spectrogram_params,
 )
@@ -53,6 +52,7 @@ from ephyviewer.timefreqviewer import (
     default_by_channel_params as upstream_channel_params,
 )
 from ephyviewer.timefreqviewer import default_params as upstream_params
+from PySide6.QtCore import QObject, Qt, Slot
 from scipy.ndimage import gaussian_filter
 
 from ephyviewer import EpochEncoder  # isort: skip
