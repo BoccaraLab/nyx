@@ -39,6 +39,7 @@ import scipy.signal
 import scipy.stats
 from ephyviewer.myqt import QT
 from ephyviewer.spectrogramviewer import SpectrogramViewer, SpectrogramWorker
+from PySide6.QtCore import QObject, Qt, Slot
 from ephyviewer.spectrogramviewer import (
     default_params as upstream_spectrogram_params,
 )
@@ -140,21 +141,51 @@ def _apply_batched(viewer, group, settings: dict) -> None:
     viewer.refresh()
 
 
+class _MainThreadRelay(QObject):
+    """Hands a worker's result to its viewer, on the viewer's thread.
+
+    Upstream connects ``worker.data_ready`` straight to
+    ``viewer.on_data_ready``. PySide does not take that bound method as a
+    slot of the viewer, so the connection has no receiver and is called
+    directly, in the *worker* thread: the image, the axes and the title were
+    all drawn from a background thread. On Linux that is a segfault at a
+    random moment, which is what kept taking the CI run down. This object
+    lives in the viewer's thread and ``forward`` is a real slot of it, so a
+    queued connection to it is delivered where drawing is allowed.
+    """
+
+    def __init__(self, viewer):
+        super().__init__(viewer)
+
+    @Slot(int, float, float, float, float, float, object)
+    def forward(self, chan, t, t_start, t_stop, t1, t2, data):
+        viewer = self.parent()
+        if viewer is not None:
+            viewer.on_data_ready(chan, t, t_start, t_stop, t1, t2, data)
+
+
+def _connect_worker(viewer, worker) -> None:
+    """Deliver ``worker``'s results to ``viewer`` on the viewer's thread."""
+    if getattr(viewer, "_relay", None) is None:
+        viewer._relay = _MainThreadRelay(viewer)
+    worker.data_ready.connect(viewer._relay.forward, Qt.QueuedConnection)
+
+
 def _close_workers(viewer) -> None:
     """Cut a closing viewer off from its workers before stopping them.
 
     Upstream's closeEvent quits each thread and waits for it -- but a
     transform already running finishes first and posts its result, which is
     then delivered while the viewer is being torn down: drawing into images
-    whose C++ side is going away. That is a segfault, not an exception, and a
-    slow CI runner lost the race. So the viewer is marked closed (its
+    whose C++ side is going away. So the viewer is marked closed (its
     ``on_data_ready`` checks) and disconnected first.
     """
     viewer._closed = True
+    relay = getattr(viewer, "_relay", None)
     for worker in getattr(viewer, "timefreq_makers", []):
         try:
-            worker.data_ready.disconnect(viewer.on_data_ready)
-        except (RuntimeError, TypeError):
+            worker.data_ready.disconnect(relay.forward)
+        except (RuntimeError, TypeError, AttributeError):
             pass  # never connected, or already gone
 
 
@@ -367,11 +398,11 @@ class NyxTimeFreqViewer(TimeFreqViewer):
         for c in range(self.source.nb_channel):
             thread = QT.QThread(parent=self)
             self.threads.append(thread)
-            worker = NyxTimeFreqWorker(self.source, self, c)  # <- the one change
+            worker = NyxTimeFreqWorker(self.source, self, c)  # <- the change
             self.timefreq_makers.append(worker)
             worker.moveToThread(thread)
             thread.start()
-            worker.data_ready.connect(self.on_data_ready)
+            _connect_worker(self, worker)   # <- and drawn on this thread
             self.request_data.connect(worker.on_request_data)
 
         self.params.param("xsize").setLimits((0, np.inf))
@@ -887,7 +918,7 @@ class NyxSpectrogramViewer(SpectrogramViewer):
             worker.moveToThread(thread)
             thread.start()
             self.last_Sxx[c] = None
-            worker.data_ready.connect(self.on_data_ready)
+            _connect_worker(self, worker)   # <- and drawn on this thread
             self.request_data.connect(worker.on_request_data)
 
         self.params.param("xsize").setLimits((0, np.inf))

@@ -31,6 +31,33 @@ pytest.importorskip("pytestqt", reason="needs pytest-qt")
 
 pytestmark = pytest.mark.gui
 
+_exit_status = {}
+
+
+def pytest_sessionfinish(session, exitstatus):
+    _exit_status["code"] = int(exitstatus)
+
+
+def pytest_unconfigure(config):
+    """End the process once pytest has reported, skipping Python's teardown.
+
+    At interpreter exit Python frees whatever Qt objects are left in no
+    particular order, sometimes after the QApplication has gone, and on
+    Linux that segfaults -- after every test has passed, failing the run
+    anyway. Nothing is left to do at that point but return the status.
+
+    Not on Windows: there ``os._exit`` still runs the Qt DLLs' own clean-up,
+    which is what crashes, and the normal exit never did.
+    """
+    import sys
+
+    if "code" not in _exit_status or sys.platform == "win32":
+        return
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(_exit_status["code"])
+
 
 @pytest.fixture
 def session(synthetic, synthetic_recording, params):

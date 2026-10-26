@@ -141,6 +141,40 @@ def test_the_fourier_window_is_never_a_single_sample(review, scored):
     assert int(binsize * rate) > 1
 
 
+@pytest.mark.parametrize("wavelet", [False, True])
+def test_spectrograms_are_drawn_on_the_main_thread(qtbot, scored, wavelet, monkeypatch):
+    """The worker's result was handed straight to on_data_ready, which PySide
+    then ran in the worker's thread -- drawing Qt images from a background
+    thread, a segfault at a random moment on Linux."""
+    import threading
+
+    from ephyviewer.datasource import SpikeInterfaceRecordingSource
+
+    from nyx.gui.viewers import NyxSpectrogramViewer, NyxTimeFreqViewer
+
+    cls = NyxTimeFreqViewer if wavelet else NyxSpectrogramViewer
+    main = threading.get_ident()
+    threads = []
+    original = cls.on_data_ready
+
+    def spy(self, *args):
+        threads.append(threading.get_ident())
+        return original(self, *args)
+
+    monkeypatch.setattr(cls, "on_data_ready", spy)
+    source = SpikeInterfaceRecordingSource(recording=scored.result().recording.eeg)
+    viewer = cls(source=source, name="EEG")
+    qtbot.addWidget(viewer)
+    try:
+        viewer.params["xsize"] = 30.0
+        viewer.seek(60.0)
+        qtbot.waitUntil(lambda: bool(threads), timeout=15_000)
+    finally:
+        viewer.close()
+
+    assert set(threads) == {main}
+
+
 def test_the_fourier_default_stands_alone_without_params(qtbot, scored):
     """Params are not obliged to declare an epoch length, so the default has
     to be usable rather than merely usually overridden.
